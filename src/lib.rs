@@ -1,3 +1,5 @@
+mod llvm;
+
 use std::fs;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -52,7 +54,7 @@ pub enum Token {
     Write { idx_in_ucs: usize },
 }
 
-pub fn lex(chars: &[UnicodeChar]) -> Vec<Token> {
+pub fn parse(chars: &[UnicodeChar]) -> Vec<Token> {
     return chars
         .iter()
         .enumerate()
@@ -70,6 +72,13 @@ pub fn lex(chars: &[UnicodeChar]) -> Vec<Token> {
         .collect();
 }
 
+pub fn compile(_tokens: &[Token]) {
+    let env = llvm::Env::new();
+    let ctx = env.create_context();
+    let module = ctx.create_module_with_name("jit-module");
+    let builder = ctx.create_builder();
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -85,7 +94,7 @@ mod test {
 [+<->]"#;
 
         let ucs = split_source_to_ucs(content);
-        let got = lex(&ucs);
+        let got = parse(&ucs);
         let expected = vec![
             Token::Write { idx_in_ucs: 0 },
             Token::Write { idx_in_ucs: 4 },
@@ -97,6 +106,8 @@ mod test {
             Token::LoopEnd { idx_in_ucs: 11 },
         ];
         assert_eq!(got, expected);
+
+        compile(&got);
     }
 }
 
