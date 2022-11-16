@@ -170,7 +170,7 @@ impl SourceFile {
             path: path.as_ref().to_path_buf(),
             reason: e.to_string(),
         })?;
-        Ok(Self::from_content(&raw))
+        Ok(Self::from_content(raw))
     }
 
     pub fn len(&self) -> usize {
