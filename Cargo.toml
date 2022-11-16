@@ -6,6 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-llvm-sys = "140"
 unicode-segmentation = "1.9.0"
-libc = "0.2"
+console = "0.15.0"
