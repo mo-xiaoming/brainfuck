@@ -35,8 +35,7 @@ jobs:
           components: "clippy, rustfmt"
       - name: rust-clippy
         run: |
-            cargo clippy --each-feature --no-dev-deps --workspace -- -D warnings
-            cargo clippy --feature-powerset --no-dev-deps --workspace -- -D warnings
+          cargo clippy -- -D warnings
       - name: cargo-fmt
         run: cargo fmt --all --verbose -- --check
       - name: Generating documents
