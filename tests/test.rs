@@ -13,15 +13,19 @@ impl MachineIO for &mut DebugMachineIO {
     fn in_char(&mut self) -> char {
         todo!()
     }
+
+    fn flush_all(&mut self) {
+        self.out_buf.clear();
+    }
 }
 
 #[test]
-fn print_0() {
+fn it_works() {
     let mut io = DebugMachineIO {
         out_buf: String::new(),
     };
-    let mut machine = Machine::<&mut DebugMachineIO>::with_io(&mut io);
-    let src_file = SourceFile::from_file("tests/artifacts/print_0.bf").unwrap();
+    let mut machine = Machine::<&mut DebugMachineIO>::with_io(30_000, &mut io);
+    let src_file = SourceFile::from_file("tests/artifacts/print_12345.bf").unwrap();
     src_file.eval_on(&mut machine);
     assert_eq!("12345", io.out_buf);
 }

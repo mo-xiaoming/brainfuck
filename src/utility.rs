@@ -68,4 +68,10 @@ pub(crate) mod traits {
         T: Default + std::fmt::Debug,
     {
     }
+    pub(crate) fn is_debug<T>(v: &T) -> usize
+    where
+        T: std::fmt::Debug,
+    {
+        format!("{:?}", v).len()
+    }
 }
