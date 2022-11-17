@@ -5,6 +5,22 @@
 
 ## Examples
 
+### As a Library
+
 ```rust
-assert_eq!(1+1, 2);
+use brainfuck::{create_default_machine, SourceFile};
+
+fn main() {
+    let mut machine = create_default_machine();
+    let src_file = SourceFile::from_file("tests/artifacts/hello_world_1.bf").unwrap();
+    src_file.eval_on(&mut machine); // OUTPUT: Hello World!
+}
+```
+
+### As an interpreter
+
+```text
+$ cargo build --release
+$ target/release/bfi tests/artifacts/hello_world_1.bf
+Hello World!
 ```
