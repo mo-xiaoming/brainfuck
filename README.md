@@ -13,7 +13,7 @@ use brainfuck::{create_default_machine, SourceFile};
 fn main() {
     let mut machine = create_default_machine();
     let src_file = SourceFile::from_file("tests/artifacts/hello_world_1.bf").unwrap();
-    src_file.eval_on(&mut machine); // OUTPUT: Hello World!
+    machine.eval(&src_file); // OUTPUT: Hello World!
 }
 ```
 
