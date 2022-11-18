@@ -1,0 +1,26 @@
+[
+    {
+        "src_file": "hello_world_1.bf",
+        "output": "hello_world_1.bf.out"
+    },
+    {
+        "src_file": "hello_world_2.bf",
+        "output": "hello_world_2.bf.out"
+    },
+    {
+        "src_file": "hello_world_3.bf",
+        "output": "hello_world_3.bf.out"
+    },
+    {
+        "src_file": "hello_world_4.bf",
+        "output": "hello_world_4.bf.out"
+    },
+    {
+        "src_file": "hello_world_5.bf",
+        "output": "hello_world_5.bf.out"
+    },
+    {
+        "src_file": "print_12345.bf",
+        "output": "print_12345.bf.out"
+    }
+]

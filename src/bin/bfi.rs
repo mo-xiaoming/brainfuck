@@ -9,5 +9,5 @@ fn main() {
 
     let mut machine = create_default_machine();
     let src_file = SourceFile::from_file(&src_file).unwrap();
-    src_file.eval_on(&mut machine);
+    machine.eval(&src_file);
 }
