@@ -8,6 +8,6 @@ fn main() {
     assert!(args.next().is_none());
 
     let mut machine = create_default_machine();
-    let src_file = SourceFile::from_file(&src_file).unwrap();
-    src_file.eval_on(&mut machine);
+    let src_file = SourceFile::from_file(src_file).unwrap();
+    machine.eval(&src_file);
 }

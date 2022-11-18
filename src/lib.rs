@@ -139,7 +139,7 @@ impl<IO: MachineIO> Machine<IO> {
         }
     }
 
-    fn eval(&mut self, src_file: &SourceFile) {
+    pub fn eval(&mut self, src_file: &SourceFile) {
         use std::collections::HashMap;
 
         let (start_to_end, end_to_start) = {
@@ -190,8 +190,8 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
-    pub fn from_file<P: AsRef<Path> + Copy>(path: P) -> Result<Self, SourceFileError> {
-        let raw = std::fs::read_to_string(path).map_err(|e| SourceFileError::FileFailToRead {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, SourceFileError> {
+        let raw = std::fs::read_to_string(&path).map_err(|e| SourceFileError::FileFailToRead {
             path: path.as_ref().to_path_buf(),
             reason: e.to_string(),
         })?;
@@ -215,10 +215,6 @@ impl SourceFile {
                 })
                 .collect(),
         }
-    }
-
-    pub fn eval_on<IO: MachineIO>(&self, machine: &mut Machine<IO>) {
-        machine.eval(self);
     }
 }
 
