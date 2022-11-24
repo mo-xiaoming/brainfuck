@@ -63,6 +63,16 @@ pub(crate) mod traits {
             + Ord,
     {
     }
+    pub(crate) fn is_big_but_incomparable_and_no_default<T>(_: &T)
+    where
+        T: std::fmt::Debug + Sync + Send + Clone,
+    {
+    }
+    pub(crate) fn is_big_but_incomparable<T>(_: &T)
+    where
+        T: Default + std::fmt::Debug + Sync + Send + Clone,
+    {
+    }
     pub(crate) fn is_default_debug<T>(_: &T)
     where
         T: Default + std::fmt::Debug + Sync + Send,

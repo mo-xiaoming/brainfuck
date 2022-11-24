@@ -3,9 +3,10 @@
 #![warn(missing_debug_implementations)]
 #![forbid(overflowing_literals)]
 
+mod utility;
+
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
-mod utility;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub enum SourceFileError {
@@ -93,13 +94,13 @@ impl<IO: MachineIO> Machine<IO> {
 
     /// > Increment the data pointer (to point to the next cell to the right).
     fn inc_data_ptr(&mut self) {
-        self.data_ptr = self.data_ptr.wrapping_add(1); //.unwrap();
+        self.data_ptr = self.data_ptr.wrapping_add(1);
         self.instr_ptr += 1;
     }
 
     /// < Decrement the data pointer (to point to the next cell to the left).
     fn dec_data_ptr(&mut self) {
-        self.data_ptr = self.data_ptr.wrapping_sub(1); //.unwrap();
+        self.data_ptr = self.data_ptr.wrapping_sub(1);
         self.instr_ptr += 1;
     }
 
@@ -148,10 +149,11 @@ impl<IO: MachineIO> Machine<IO> {
 
             let mut starts = Vec::with_capacity(10);
 
-            for (idx_in_ucs, UnicodeChar { unicode, .. }) in src_file.content.iter().enumerate() {
-                if unicode == "[" {
+            for (idx_in_ucs, uc) in src_file.content.iter().enumerate() {
+                let token = src_file.get_token(uc);
+                if token == "[" {
                     starts.push(idx_in_ucs);
-                } else if unicode == "]" {
+                } else if token == "]" {
                     let start_idx = starts.pop().unwrap();
                     let existed = start_to_end.insert(start_idx, idx_in_ucs);
                     assert!(existed.is_none());
@@ -164,7 +166,7 @@ impl<IO: MachineIO> Machine<IO> {
         };
 
         while self.instr_ptr < src_file.content.len() {
-            match src_file.content[self.instr_ptr].unicode.as_ref() {
+            match src_file.get_token(&src_file.content[self.instr_ptr]) {
                 "." => self.print(),
                 "," => self.read(),
                 ">" => self.inc_data_ptr(),
@@ -184,18 +186,130 @@ pub fn create_default_machine() -> Machine<DefaultMachineIO> {
     Machine::<DefaultMachineIO>::with_io(60_000, io)
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct SourceFile {
+    filename: std::path::PathBuf,
+    raw_content: String,
     content: UnicodeChars,
 }
 
+fn make_range_for_single_token(
+    row: usize,
+    column: usize,
+    offset: usize,
+) -> (SourceFileLocation, SourceFileLocation) {
+    (
+        SourceFileLocation {
+            row,
+            column,
+            offset,
+        },
+        SourceFileLocation {
+            row,
+            column: column + 1,
+            offset: offset + 1,
+        },
+    )
+}
+
 impl SourceFile {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, SourceFileError> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, SourceFileError> {
         let raw = std::fs::read_to_string(&path).map_err(|e| SourceFileError::FileFailToRead {
             path: path.as_ref().to_path_buf(),
             reason: e.to_string(),
         })?;
-        Ok(Self::from_content(raw))
+        Self::from_str(raw, path)
+    }
+    fn from_str<S: AsRef<str>, P: AsRef<Path>>(
+        s: S,
+        pseudo_filename: P,
+    ) -> Result<Self, SourceFileError> {
+        let content = Self::lex(s.as_ref());
+        Ok(Self {
+            filename: pseudo_filename.as_ref().to_path_buf(),
+            raw_content: s.as_ref().to_owned(),
+            content,
+        })
+    }
+
+    pub fn to_byte_code(&self) -> Vec<ByteCode> {
+        let mut row = 0;
+        let mut col = 0;
+        self.content
+            .iter()
+            .flat_map(|uc| match self.get_token(uc) {
+                "+" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::IncData,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "-" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::DecData,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                ">" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::IncPtr,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "<" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::DecPtr,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "[" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::JumpIfDataZero,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "]" => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::JumpIfDataNotZero,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "." => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::Write,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "," => {
+                    col += 1;
+                    Some(ByteCode {
+                        kind: ByteCodeKind::Read,
+                        arg: 1,
+                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
+                    })
+                }
+                "\n" | "\r\n" => {
+                    row += 1;
+                    col = 0;
+                    None
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn len(&self) -> usize {
@@ -206,29 +320,93 @@ impl SourceFile {
         self.content.is_empty()
     }
 
-    pub fn from_content<S: AsRef<str>>(content: S) -> Self {
-        Self {
-            content: UnicodeSegmentation::grapheme_indices(content.as_ref(), true)
-                .map(|(idx, uc)| UnicodeChar {
-                    idx_in_raw: idx,
-                    unicode: uc.to_owned(),
-                })
-                .collect(),
+    fn get_token(&self, uc: &UnicodeChar) -> &str {
+        &self.raw_content[uc.idx_in_raw..uc.idx_in_raw + uc.length]
+    }
+
+    fn lex<S: AsRef<str>>(raw: S) -> UnicodeChars {
+        UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
+            .map(|(idx, uc)| UnicodeChar {
+                idx_in_raw: idx,
+                length: uc.len(),
+            })
+            .collect()
+    }
+
+    pub fn iter(&self) -> SourceFileIter<'_> {
+        self.into_iter()
+    }
+}
+
+#[derive(Debug)]
+pub struct SourceFileIter<'a> {
+    src_file: &'a SourceFile,
+    idx_in_src: usize,
+}
+
+impl<'a> Iterator for SourceFileIter<'a> {
+    type Item = &'a UnicodeChar;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx_in_src == self.src_file.len() {
+            None
+        } else {
+            self.idx_in_src += 1;
+            Some(&self.src_file.content[self.idx_in_src - 1])
         }
     }
 }
 
-#[derive(Debug, Default)]
+impl<'a> IntoIterator for &'a SourceFile {
+    type Item = &'a UnicodeChar;
+
+    type IntoIter = SourceFileIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter {
+            src_file: self,
+            idx_in_src: 0,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct UnicodeChar {
-    pub idx_in_raw: usize,
-    pub unicode: String,
+    idx_in_raw: usize,
+    length: usize,
 }
 
 type UnicodeChars = Vec<UnicodeChar>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+enum ByteCodeKind {
+    IncPtr,
+    DecPtr,
+    IncData,
+    DecData,
+    Read,
+    Write,
+    JumpIfDataZero,
+    JumpIfDataNotZero,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub struct ByteCode {
+    kind: ByteCodeKind,
+    arg: u32,
+    range: (SourceFileLocation, SourceFileLocation),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+struct SourceFileLocation {
+    row: usize,
+    column: usize,
+    offset: usize,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use pretty_assertions_sorted::assert_eq;
 
     #[test]
     fn traits() {
@@ -242,20 +420,27 @@ mod test {
         };
         is_big_value_enum(&src_file_error);
 
-        is_default_debug(&SourceFile::default());
+        is_big_value_struct(&SourceFile::default());
 
         is_debug(&create_default_machine());
 
-        is_default_debug(&SourceFile::default());
+        is_big_value_struct(&UnicodeChar::default());
 
-        is_default_debug(&UnicodeChar::default());
+        is_big_value_struct(&UnicodeChars::default());
 
-        is_default_debug(&UnicodeChars::default());
+        is_debug(&SourceFileIter {
+            src_file: &SourceFile::default(),
+            idx_in_src: 0,
+        });
+
+        is_small_value_enum(&ByteCodeKind::DecData);
+
+        is_small_value_struct(&SourceFileLocation::default());
     }
 
     #[test]
     fn error_when_source_file_does_not_exist() {
-        assert!(SourceFile::from_file("I hope it doesn't exist").is_err());
+        assert!(SourceFile::new("I hope it doesn't exist").is_err());
     }
 
     #[test]
@@ -263,8 +448,68 @@ mod test {
         let content = r#".a̐éö̲.
 [+-]"#;
 
-        let src_file = SourceFile::from_content(content);
+        let src_file = SourceFile::lex(content);
         assert_eq!(10, src_file.len());
+        let mut s = String::with_capacity(20);
+        src_file.iter().fold(&mut s, |acc, x| {
+            acc.push_str(&content[x.idx_in_raw..x.idx_in_raw + x.length]);
+            acc
+        });
+        assert_eq!(s, content);
+    }
+
+    #[test]
+    fn byte_code() {
+        let content = r#"[+-,.]
+<>"#;
+
+        let src_file = SourceFile::from_str(content, "").unwrap();
+        let byte_code = src_file.to_byte_code();
+        assert_eq!(
+            byte_code,
+            vec![
+                ByteCode {
+                    kind: ByteCodeKind::JumpIfDataZero,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 0, 0)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::IncData,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 1, 1)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::DecData,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 2, 2)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::Read,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 3, 3)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::Write,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 4, 4)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::JumpIfDataNotZero,
+                    arg: 1,
+                    range: make_range_for_single_token(0, 5, 5)
+                },
+                ByteCode {
+                    kind: ByteCodeKind::DecPtr,
+                    arg: 1,
+                    range: make_range_for_single_token(1, 0, 7) // offset 6 is new line
+                },
+                ByteCode {
+                    kind: ByteCodeKind::IncPtr,
+                    arg: 1,
+                    range: make_range_for_single_token(1, 1, 8)
+                },
+            ]
+        );
     }
 }
 

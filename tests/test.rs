@@ -28,6 +28,7 @@ struct Test {
 
 #[test]
 fn it_works() {
+    use pretty_assertions_sorted::assert_eq;
     use std::path::Path;
 
     let test_base_dir = Path::new("tests/artifacts");
@@ -39,7 +40,7 @@ fn it_works() {
     };
     for t in &tests {
         let mut machine = Machine::<&mut DebugMachineIO>::with_io(30_000, &mut io);
-        let src_file = SourceFile::from_file(test_base_dir.join(&t.src_file)).unwrap();
+        let src_file = SourceFile::new(test_base_dir.join(&t.src_file)).unwrap();
         machine.eval(&src_file);
 
         let output = std::fs::read_to_string(test_base_dir.join(&t.output)).unwrap();
