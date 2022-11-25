@@ -196,7 +196,7 @@ impl<IO: MachineIO> Machine<IO> {
         }
     }
 
-    pub fn eval_byte_codes(&mut self, byte_codes: &Vec<ByteCode>) {
+    pub fn eval_byte_codes(&mut self, byte_codes: &[ByteCode]) {
         use std::collections::HashMap;
 
         let (start_to_end, end_to_start) = {
