@@ -79,10 +79,10 @@ impl<IO: MachineIO> Machine<IO> {
         }
     }
 
-    const fn reset_data_ptr(cell_size: usize) -> usize {
+    fn reset_data_ptr(cell_size: usize) -> usize {
         cell_size / 2
     }
-    const fn reset_instr_ptr() -> usize {
+    fn reset_instr_ptr() -> usize {
         0
     }
 
