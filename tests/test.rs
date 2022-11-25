@@ -3,12 +3,12 @@ use serde::Deserialize;
 
 #[derive(Debug)]
 struct DebugMachineIO {
-    out_buf: String,
+    out_buf: std::cell::RefCell<String>,
 }
 
-impl MachineIO for &mut DebugMachineIO {
+impl MachineIO for &DebugMachineIO {
     fn out_char(&mut self, c: char) {
-        self.out_buf.push(c);
+        self.out_buf.borrow_mut().push(c);
     }
 
     fn in_char(&mut self) -> char {
@@ -16,7 +16,7 @@ impl MachineIO for &mut DebugMachineIO {
     }
 
     fn flush_all(&mut self) {
-        self.out_buf.clear();
+        self.out_buf.borrow_mut().clear();
     }
 }
 
@@ -35,17 +35,33 @@ fn it_works() {
 
     let json = std::fs::read_to_string(test_base_dir.join("oracles.json")).unwrap();
     let tests: Vec<Test> = serde_json::from_str(&json).unwrap();
-    let mut io = DebugMachineIO {
-        out_buf: String::new(),
+    let io = &DebugMachineIO {
+        out_buf: std::cell::RefCell::new(String::new()),
     };
     for t in &tests {
-        let mut machine = Machine::<&mut DebugMachineIO>::with_io(30_000, &mut io);
+        let mut machine = Machine::with_io(30_000, io);
         let src_file = SourceFile::new(test_base_dir.join(&t.src_file)).unwrap();
-        machine.eval(&src_file);
+        machine.eval_source_file(&src_file);
 
         let output = std::fs::read_to_string(test_base_dir.join(&t.output)).unwrap();
-        assert_eq!(output, io.out_buf, "failed on {}", t.src_file);
+        assert_eq!(
+            output,
+            io.out_buf.borrow().as_ref(),
+            "source file eval failed on {}",
+            t.src_file
+        );
 
-        (&mut io).flush_all();
+        machine.reset();
+
+        let byte_codes = src_file.to_byte_codes();
+        machine.eval_byte_codes(&byte_codes);
+        assert_eq!(
+            output,
+            io.out_buf.borrow().as_ref(),
+            "byte codes eval failed on {}",
+            t.src_file
+        );
+
+        machine.reset();
     }
 }
