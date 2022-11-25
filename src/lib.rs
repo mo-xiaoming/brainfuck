@@ -73,10 +73,26 @@ impl<IO: MachineIO> Machine<IO> {
     pub fn with_io(cell_size: usize, io: IO) -> Self {
         Self {
             cells: vec![0; cell_size],
-            data_ptr: cell_size / 2,
-            instr_ptr: 0,
+            data_ptr: Self::reset_data_ptr(cell_size),
+            instr_ptr: Self::reset_instr_ptr(),
             io,
         }
+    }
+
+    const fn reset_data_ptr(cell_size: usize) -> usize {
+        cell_size / 2
+    }
+    const fn reset_instr_ptr() -> usize {
+        0
+    }
+
+    /// must be called between different `eval_` calls,
+    /// otherwise the behavior is undefined
+    pub fn reset(&mut self) {
+        self.cells.iter_mut().for_each(|e| *e = 0);
+        self.data_ptr = Self::reset_data_ptr(self.cells.len());
+        self.instr_ptr = Self::reset_instr_ptr();
+        self.io.flush_all();
     }
 
     /// . Output the byte at the data pointer.
@@ -140,7 +156,7 @@ impl<IO: MachineIO> Machine<IO> {
         }
     }
 
-    pub fn eval(&mut self, src_file: &SourceFile) {
+    pub fn eval_source_file(&mut self, src_file: &SourceFile) {
         use std::collections::HashMap;
 
         let (start_to_end, end_to_start) = {
@@ -176,6 +192,47 @@ impl<IO: MachineIO> Machine<IO> {
                 "[" => self.start_loop(*start_to_end.get(&self.instr_ptr).unwrap()),
                 "]" => self.end_loop(*end_to_start.get(&self.instr_ptr).unwrap()),
                 _ => self.instr_ptr += 1,
+            }
+        }
+    }
+
+    pub fn eval_byte_codes(&mut self, byte_codes: &Vec<ByteCode>) {
+        use std::collections::HashMap;
+
+        let (start_to_end, end_to_start) = {
+            let mut start_to_end = HashMap::<usize, usize>::new();
+            let mut end_to_start = HashMap::<usize, usize>::new();
+
+            let mut starts = Vec::with_capacity(10);
+
+            for (idx, code) in byte_codes.iter().enumerate() {
+                if code.is_loop_start() {
+                    starts.push(idx);
+                } else if code.is_loop_end() {
+                    let start_idx = starts.pop().unwrap();
+                    let existed = start_to_end.insert(start_idx, idx);
+                    assert!(existed.is_none());
+                    let existed = end_to_start.insert(idx, start_idx);
+                    assert!(existed.is_none());
+                }
+            }
+            (start_to_end, end_to_start)
+        };
+
+        while self.instr_ptr < byte_codes.len() {
+            match byte_codes[self.instr_ptr].kind {
+                ByteCodeKind::Write => self.print(),
+                ByteCodeKind::Read => self.read(),
+                ByteCodeKind::IncPtr => self.inc_data_ptr(),
+                ByteCodeKind::DecPtr => self.dec_data_ptr(),
+                ByteCodeKind::IncData => self.inc_cell_value(),
+                ByteCodeKind::DecData => self.dec_cell_value(),
+                ByteCodeKind::JumpIfDataZero => {
+                    self.start_loop(*start_to_end.get(&self.instr_ptr).unwrap())
+                }
+                ByteCodeKind::JumpIfDataNotZero => {
+                    self.end_loop(*end_to_start.get(&self.instr_ptr).unwrap())
+                }
             }
         }
     }
@@ -232,82 +289,48 @@ impl SourceFile {
         })
     }
 
-    pub fn to_byte_code(&self) -> Vec<ByteCode> {
+    pub fn to_byte_codes(&self) -> Vec<ByteCode> {
+        fn update(
+            kind: ByteCodeKind,
+            row: usize,
+            col: &mut usize,
+            offset: usize,
+        ) -> Option<ByteCode> {
+            *col += 1;
+            Some(ByteCode {
+                kind,
+                arg: 1,
+                range: make_range_for_single_token(row, *col - 1, offset),
+            })
+        }
+
         let mut row = 0;
         let mut col = 0;
         self.content
             .iter()
             .flat_map(|uc| match self.get_token(uc) {
-                "+" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::IncData,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "-" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::DecData,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                ">" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::IncPtr,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "<" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::DecPtr,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "[" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::JumpIfDataZero,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "]" => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::JumpIfDataNotZero,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "." => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::Write,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
-                "," => {
-                    col += 1;
-                    Some(ByteCode {
-                        kind: ByteCodeKind::Read,
-                        arg: 1,
-                        range: make_range_for_single_token(row, col - 1, uc.idx_in_raw),
-                    })
-                }
+                "+" => update(ByteCodeKind::IncData, row, &mut col, uc.idx_in_raw),
+                "-" => update(ByteCodeKind::DecData, row, &mut col, uc.idx_in_raw),
+                ">" => update(ByteCodeKind::IncPtr, row, &mut col, uc.idx_in_raw),
+                "<" => update(ByteCodeKind::DecPtr, row, &mut col, uc.idx_in_raw),
+                "[" => update(ByteCodeKind::JumpIfDataZero, row, &mut col, uc.idx_in_raw),
+                "]" => update(
+                    ByteCodeKind::JumpIfDataNotZero,
+                    row,
+                    &mut col,
+                    uc.idx_in_raw,
+                ),
+                "." => update(ByteCodeKind::Write, row, &mut col, uc.idx_in_raw),
+                "," => update(ByteCodeKind::Read, row, &mut col, uc.idx_in_raw),
                 "\n" | "\r\n" => {
                     row += 1;
                     col = 0;
                     None
                 }
-                _ => None,
+                _ => {
+                    col += 1;
+                    None
+                }
             })
             .collect()
     }
@@ -396,6 +419,34 @@ pub struct ByteCode {
     range: (SourceFileLocation, SourceFileLocation),
 }
 
+#[allow(dead_code)]
+impl ByteCode {
+    fn is_inc_ptr(&self) -> bool {
+        self.kind == ByteCodeKind::IncPtr
+    }
+    fn is_dec_ptr(&self) -> bool {
+        self.kind == ByteCodeKind::DecPtr
+    }
+    fn is_inc_data(&self) -> bool {
+        self.kind == ByteCodeKind::IncData
+    }
+    fn is_dec_data(&self) -> bool {
+        self.kind == ByteCodeKind::DecData
+    }
+    fn is_read(&self) -> bool {
+        self.kind == ByteCodeKind::Read
+    }
+    fn is_write(&self) -> bool {
+        self.kind == ByteCodeKind::Write
+    }
+    fn is_loop_start(&self) -> bool {
+        self.kind == ByteCodeKind::JumpIfDataZero
+    }
+    fn is_loop_end(&self) -> bool {
+        self.kind == ByteCodeKind::JumpIfDataNotZero
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 struct SourceFileLocation {
     row: usize,
@@ -460,11 +511,11 @@ mod test {
 
     #[test]
     fn byte_code() {
-        let content = r#"[+-,.]
+        let content = r#"[+-,comment.]
 <>"#;
 
         let src_file = SourceFile::from_str(content, "").unwrap();
-        let byte_code = src_file.to_byte_code();
+        let byte_code = src_file.to_byte_codes();
         assert_eq!(
             byte_code,
             vec![
@@ -491,25 +542,51 @@ mod test {
                 ByteCode {
                     kind: ByteCodeKind::Write,
                     arg: 1,
-                    range: make_range_for_single_token(0, 4, 4)
+                    range: make_range_for_single_token(0, 11, 11) // skip 7 bytes comment
                 },
                 ByteCode {
                     kind: ByteCodeKind::JumpIfDataNotZero,
                     arg: 1,
-                    range: make_range_for_single_token(0, 5, 5)
+                    range: make_range_for_single_token(0, 12, 12)
                 },
                 ByteCode {
                     kind: ByteCodeKind::DecPtr,
                     arg: 1,
-                    range: make_range_for_single_token(1, 0, 7) // offset 6 is new line
+                    range: make_range_for_single_token(1, 0, 14) // offset 6 is new line
                 },
                 ByteCode {
                     kind: ByteCodeKind::IncPtr,
                     arg: 1,
-                    range: make_range_for_single_token(1, 1, 8)
+                    range: make_range_for_single_token(1, 1, 15)
                 },
             ]
         );
+    }
+
+    #[test]
+    fn is_kind() {
+        let mut code = ByteCode {
+            kind: ByteCodeKind::IncData,
+            arg: 1,
+            range: (SourceFileLocation::default(), SourceFileLocation::default()),
+        };
+
+        code.kind = ByteCodeKind::DecData;
+        assert!(code.is_dec_data());
+        code.kind = ByteCodeKind::IncData;
+        assert!(code.is_inc_data());
+        code.kind = ByteCodeKind::DecPtr;
+        assert!(code.is_dec_ptr());
+        code.kind = ByteCodeKind::IncPtr;
+        assert!(code.is_inc_ptr());
+        code.kind = ByteCodeKind::Write;
+        assert!(code.is_write());
+        code.kind = ByteCodeKind::Read;
+        assert!(code.is_read());
+        code.kind = ByteCodeKind::JumpIfDataZero;
+        assert!(code.is_loop_start());
+        code.kind = ByteCodeKind::JumpIfDataNotZero;
+        assert!(code.is_loop_end());
     }
 }
 
