@@ -5,24 +5,23 @@
 
 ## TODO
 
-[ ] add optimizations at byte code level
-  [ ] peephole
-  [ ] too many to be listed
-[ ] add llvm c api backend to jit it
-[ ] add better error handling, currently there is none besides panicking
+- [ ] add optimizations at byte code level
+  - [ ] peephole
+  - [ ] too many to be listed
+- [ ] add llvm c api backend to jit it
+- [ ] add better error handling, currently there is none besides panicking
 
 ## Examples
 
 ### As a Library
 
 ```rust
-use brainfuck::{create_default_machine, SourceFile};
+use brainfuck::{machine::create_default_machine, source_file::SourceFile};
 
 fn main() {
     let mut machine = create_default_machine();
     let src_file = SourceFile::new("tests/artifacts/hello_world_1.bf").unwrap();
     machine.eval_source_file(&src_file);  // OUTPUT: Hello World!
-    machine.reset();
     let byte_codes = src_file.to_byte_codes();
     machine.eval_byte_codes(&byte_codes); // OUTPUT: Hello World!
 }
@@ -48,11 +47,22 @@ $ /usr/bin/time ./target/release/bfi tests/artifacts/mandelbrot.bf
 
 *above data is not true*, not any more. don't know what I have done to slow it down 200%
 
-```test
+```text
 $ cargo run --release --bin bfi ./tests/artifacts/mandelbrot.bf >/dev/null
   Compiling brainfuck v0.1.0 (/home/mx/repos/brainfuck-rs)
     Finished release [optimized] target(s) in 0.93s
       Running `target/release/bfi ./tests/artifacts/mandelbrot.bf`
 eval source file: 76
 eval byte codes: 51
+```
+
+Something is off, now these numbers became
+
+```text
+22:56 $ cargo run --release --bin bfi ./tests/artifacts/mandelbrot.bf >/dev/null
+   Compiling brainfuck v0.1.0 (/home/mx/repos/brainfuck-rs)
+    Finished release [optimized] target(s) in 1.88s
+     Running `target/release/bfi ./tests/artifacts/mandelbrot.bf`
+eval source file: 117
+eval byte codes: 29
 ```

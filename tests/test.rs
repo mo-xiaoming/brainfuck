@@ -1,4 +1,4 @@
-use brainfuck::{Machine, MachineIO, SourceFile};
+use brainfuck::{machine::Machine, machine_io::MachineIO, source_file::SourceFile};
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -7,8 +7,8 @@ struct DebugMachineIO {
 }
 
 impl MachineIO for &DebugMachineIO {
-    fn out_char(&mut self, c: char) {
-        self.out_buf.borrow_mut().push(c);
+    fn out_char_n_times(&mut self, c: char, n: usize) {
+        self.out_buf.borrow_mut().push_str(&c.to_string().repeat(n));
     }
 
     fn in_char(&mut self) -> char {
@@ -51,8 +51,6 @@ fn it_works() {
             t.src_file
         );
 
-        machine.reset();
-
         let byte_codes = src_file.to_byte_codes();
         machine.eval_byte_codes(&byte_codes);
         assert_eq!(
@@ -61,7 +59,5 @@ fn it_works() {
             "byte codes eval failed on {}",
             t.src_file
         );
-
-        machine.reset();
     }
 }
