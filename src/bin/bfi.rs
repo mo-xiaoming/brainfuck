@@ -1,4 +1,4 @@
-use brainfuck::{create_default_machine, SourceFile};
+use brainfuck::{machine::create_default_machine, source_file::SourceFile};
 
 fn main() {
     let mut args = std::env::args();
@@ -13,9 +13,8 @@ fn main() {
     machine.eval_source_file(&src_file);
     eprintln!("eval source file: {}", start.elapsed().as_secs());
 
-    machine.reset();
-    let byte_code = src_file.to_byte_codes();
+    let byte_codes = src_file.to_byte_codes();
     let start = std::time::Instant::now();
-    machine.eval_byte_codes(&byte_code);
+    machine.eval_byte_codes(&byte_codes);
     eprintln!("eval byte codes: {}", start.elapsed().as_secs());
 }
