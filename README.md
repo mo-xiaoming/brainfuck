@@ -45,24 +45,10 @@ $ /usr/bin/time ./target/release/bfi tests/artifacts/mandelbrot.bf
 0inputs+0outputs (0major+301minor)pagefaults 0swaps
 ```
 
-*above data is not true*, not any more. don't know what I have done to slow it down 200%
+I don't know what did I do to get previous data for interpreting source file. Following are the new numbers,
 
-```text
-$ cargo run --release --bin bfi ./tests/artifacts/mandelbrot.bf >/dev/null
-  Compiling brainfuck v0.1.0 (/home/mx/repos/brainfuck-rs)
-    Finished release [optimized] target(s) in 0.93s
-      Running `target/release/bfi ./tests/artifacts/mandelbrot.bf`
-eval source file: 76
-eval byte codes: 51
-```
+With interpreting source file directly, eval time is 133 seconds
 
-Something is off, now these numbers became
+With byte codes, eval time down to 29 seconds
 
-```text
-22:56 $ cargo run --release --bin bfi ./tests/artifacts/mandelbrot.bf >/dev/null
-   Compiling brainfuck v0.1.0 (/home/mx/repos/brainfuck-rs)
-    Finished release [optimized] target(s) in 1.88s
-     Running `target/release/bfi ./tests/artifacts/mandelbrot.bf`
-eval source file: 117
-eval byte codes: 29
-```
+With "compressed" byte codes, eval time down to 14 seconds. "Compressed" means to transform codes like ">>>>" to "4>".

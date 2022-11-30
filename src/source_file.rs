@@ -63,7 +63,7 @@ pub struct SourceFile {
     content: UnicodeChars,
 }
 
-fn make_range_for_single_token(
+fn make_range_for_token(
     src_file: &SourceFile,
     row: usize,
     column: usize,
@@ -152,57 +152,85 @@ impl SourceFile {
     }
 
     pub fn to_byte_codes(&self) -> Vec<ByteCode> {
-        fn update<'src_file, 'c>(
+        fn make_byte_code<'src_file, 'c>(
             this: &'src_file SourceFile,
+            arg: usize,
             kind: ByteCodeKind,
             row: usize,
             col: &'c mut usize,
             offset: usize,
-        ) -> Option<ByteCode<'src_file>> {
-            *col += 1;
-            Some(ByteCode {
+        ) -> ByteCode<'src_file> {
+            *col += arg;
+            ByteCode {
                 kind,
-                arg: 1,
-                range: make_range_for_single_token(this, row, *col - 1, offset),
-            })
+                arg,
+                range: make_range_for_token(this, row, *col - arg, offset),
+            }
         }
 
         let mut row = 0;
         let mut col = 0;
-        let mut byte_codes = self
-            .iter()
-            .flat_map(|uc| match self.get_token(uc) {
-                "+" => update(self, ByteCodeKind::IncData, row, &mut col, uc.idx_in_raw),
-                "-" => update(self, ByteCodeKind::DecData, row, &mut col, uc.idx_in_raw),
-                ">" => update(self, ByteCodeKind::IncPtr, row, &mut col, uc.idx_in_raw),
-                "<" => update(self, ByteCodeKind::DecPtr, row, &mut col, uc.idx_in_raw),
-                "[" => update(
-                    self,
-                    ByteCodeKind::LoopStartJumpIfDataZero,
-                    row,
-                    &mut col,
-                    uc.idx_in_raw,
-                ),
-                "]" => update(
-                    self,
-                    ByteCodeKind::LoopEndJumpIfDataNotZero,
-                    row,
-                    &mut col,
-                    uc.idx_in_raw,
-                ),
-                "." => update(self, ByteCodeKind::Write, row, &mut col, uc.idx_in_raw),
-                "," => update(self, ByteCodeKind::Read, row, &mut col, uc.idx_in_raw),
-                "\n" | "\r\n" => {
+        let mut idx = 0;
+        let mut byte_codes = Vec::with_capacity(self.len());
+        let symbols = std::collections::HashMap::from([
+            ("+", ByteCodeKind::IncData),
+            ("-", ByteCodeKind::DecData),
+            (">", ByteCodeKind::IncPtr),
+            ("<", ByteCodeKind::DecPtr),
+            (".", ByteCodeKind::Write),
+            (",", ByteCodeKind::Read),
+        ]);
+        while idx < self.content.len() {
+            let cur_offset = self.content[idx].idx_in_raw;
+            match self.get_token(&self.content[idx]) {
+                s if symbols.contains_key(s) => {
+                    let arg = self.content[idx..]
+                        .iter()
+                        .position(|e| self.get_token(e) != s)
+                        .unwrap_or(1);
+                    byte_codes.push(make_byte_code(
+                        self,
+                        arg,
+                        *symbols.get(s).unwrap(),
+                        row,
+                        &mut col,
+                        cur_offset,
+                    ));
+                    idx += arg;
+                }
+                "[" => {
+                    byte_codes.push(make_byte_code(
+                        self,
+                        1,
+                        ByteCodeKind::LoopStartJumpIfDataZero,
+                        row,
+                        &mut col,
+                        cur_offset,
+                    ));
+                    idx += 1;
+                }
+                "]" => {
+                    byte_codes.push(make_byte_code(
+                        self,
+                        1,
+                        ByteCodeKind::LoopEndJumpIfDataNotZero,
+                        row,
+                        &mut col,
+                        cur_offset,
+                    ));
+                    idx += 1;
+                }
+                "\r\n" | "\n" => {
                     row += 1;
                     col = 0;
-                    None
+                    idx += 1;
                 }
                 _ => {
                     col += 1;
-                    None
+                    idx += 1;
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
 
         let (start_to_end, end_to_start) = populate_byte_codes_loop_boundaries(byte_codes.iter());
         for (
@@ -334,42 +362,42 @@ mod test {
                 ByteCode {
                     kind: ByteCodeKind::LoopStartJumpIfDataZero,
                     arg: 5,
-                    range: make_range_for_single_token(&src_file, 0, 0, 0)
+                    range: make_range_for_token(&src_file, 0, 0, 0)
                 },
                 ByteCode {
                     kind: ByteCodeKind::IncData,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 0, 1, 1)
+                    range: make_range_for_token(&src_file, 0, 1, 1)
                 },
                 ByteCode {
                     kind: ByteCodeKind::DecData,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 0, 2, 2)
+                    range: make_range_for_token(&src_file, 0, 2, 2)
                 },
                 ByteCode {
                     kind: ByteCodeKind::Read,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 0, 3, 3)
+                    range: make_range_for_token(&src_file, 0, 3, 3)
                 },
                 ByteCode {
                     kind: ByteCodeKind::Write,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 0, 11, 11) // skip 7 bytes comment
+                    range: make_range_for_token(&src_file, 0, 11, 11) // skip 7 bytes comment
                 },
                 ByteCode {
                     kind: ByteCodeKind::LoopEndJumpIfDataNotZero,
                     arg: 0,
-                    range: make_range_for_single_token(&src_file, 0, 12, 12)
+                    range: make_range_for_token(&src_file, 0, 12, 12)
                 },
                 ByteCode {
                     kind: ByteCodeKind::DecPtr,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 1, 0, 14) // offset 6 is new line
+                    range: make_range_for_token(&src_file, 1, 0, 14) // offset 6 is new line
                 },
                 ByteCode {
                     kind: ByteCodeKind::IncPtr,
                     arg: 1,
-                    range: make_range_for_single_token(&src_file, 1, 1, 15)
+                    range: make_range_for_token(&src_file, 1, 1, 15)
                 },
             ]
         );
