@@ -12,6 +12,8 @@ pub struct Machine<IO> {
     data_ptr: usize,
     instr_ptr: usize,
     io: IO,
+    #[cfg(feature = "instr_timing")]
+    instr_timings: crate::utility::timing::InstructionTimingCollector,
 }
 
 impl<IO: MachineIO> Machine<IO> {
@@ -21,6 +23,18 @@ impl<IO: MachineIO> Machine<IO> {
             data_ptr: Self::reset_data_ptr(cell_size),
             instr_ptr: Self::reset_instr_ptr(),
             io,
+            #[cfg(feature = "instr_timing")]
+            instr_timings: crate::utility::timing::InstructionTimingCollector::new(&[
+                "write",
+                "read",
+                "inc_ptr",
+                "dec_ptr",
+                "inc_data",
+                "dec_data",
+                "loop_start",
+                "loop_end",
+                "get_token",
+            ]),
         }
     }
 
@@ -41,6 +55,9 @@ impl<IO: MachineIO> Machine<IO> {
 
     /// . Output `arg` bytes at the data pointer.
     fn write(&mut self, arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self.instr_timings.start(smol_str::SmolStr::from("write"));
+
         self.io
             .out_char_n_times(*self.cells.get(self.data_ptr).unwrap() as char, arg);
         self.instr_ptr += 1;
@@ -48,24 +65,38 @@ impl<IO: MachineIO> Machine<IO> {
 
     /// , Accept one byte of input, storing its value in the byte at the data pointer.
     fn read(&mut self, _arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self.instr_timings.start(smol_str::SmolStr::from("read"));
+
         *self.cells.get_mut(self.data_ptr).unwrap() = self.io.in_char() as CellDataType;
         self.instr_ptr += 1;
     }
 
     /// > Increment the data pointer (to point to the next `arg` cells to the right).
     fn inc_ptr(&mut self, arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self.instr_timings.start(smol_str::SmolStr::from("inc_ptr"));
+
         self.data_ptr = self.data_ptr.wrapping_add(arg);
         self.instr_ptr += 1;
     }
 
     /// < Decrement the data pointer (to point to the previous `arg` cells to the left).
     fn dec_ptr(&mut self, arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self.instr_timings.start(smol_str::SmolStr::from("dec_ptr"));
+
         self.data_ptr = self.data_ptr.wrapping_sub(arg);
         self.instr_ptr += 1;
     }
 
     /// + Increment (increase by `arg`) the byte at the data pointer.
     fn inc_data(&mut self, arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self
+            .instr_timings
+            .start(smol_str::SmolStr::from("inc_data"));
+
         *self.cells.get_mut(self.data_ptr).unwrap() = self
             .cells
             .get(self.data_ptr)
@@ -76,6 +107,11 @@ impl<IO: MachineIO> Machine<IO> {
 
     /// - Decrement (decrease by `arg`) the byte at the data pointer.
     fn dec_data(&mut self, arg: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self
+            .instr_timings
+            .start(smol_str::SmolStr::from("dec_data"));
+
         *self.cells.get_mut(self.data_ptr).unwrap() = self
             .cells
             .get(self.data_ptr)
@@ -88,6 +124,11 @@ impl<IO: MachineIO> Machine<IO> {
     ///    the instruction pointer forward to the next command, jump it
     ///    forward to the command after the matching ] command.
     fn loop_start_jump_if_data_zero(&mut self, end_ptr: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self
+            .instr_timings
+            .start(smol_str::SmolStr::from("loop_start"));
+
         if *self.cells.get(self.data_ptr).unwrap() == 0 {
             self.instr_ptr = end_ptr + 1;
         } else {
@@ -99,6 +140,11 @@ impl<IO: MachineIO> Machine<IO> {
     ///   moving the instruction pointer forward to the next command,
     ///   jump it back to the command after the matching [ command.
     fn loop_end_jump_if_data_not_zero(&mut self, start_ptr: usize) {
+        #[cfg(feature = "instr_timing")]
+        let _t = self
+            .instr_timings
+            .start(smol_str::SmolStr::from("loop_end"));
+
         if *self.cells.get(self.data_ptr).unwrap() != 0 {
             self.instr_ptr = start_ptr;
         } else {
@@ -113,7 +159,14 @@ impl<IO: MachineIO> Machine<IO> {
             populate_byte_codes_loop_boundaries(RawSourceCodes { src_file }.into_iter());
 
         while self.instr_ptr < src_file.len() {
-            match src_file.get_token(src_file.at_instr_ptr(self.instr_ptr)) {
+            match {
+                #[cfg(feature = "instr_timing")]
+                let _t = self
+                    .instr_timings
+                    .start(smol_str::SmolStr::from("get_token"));
+
+                src_file.get_token(src_file.at_instr_ptr(self.instr_ptr))
+            } {
                 "." => self.write(1),
                 "," => self.read(1),
                 ">" => self.inc_ptr(1),
@@ -129,13 +182,25 @@ impl<IO: MachineIO> Machine<IO> {
                 _ => self.instr_ptr += 1,
             }
         }
+
+        #[cfg(feature = "instr_timing")]
+        self.instr_timings.finalize(|s| {
+            println!("{}", s);
+        });
     }
 
     pub fn eval_byte_codes(&mut self, byte_codes: &[ByteCode]) {
         self.reset();
 
         while self.instr_ptr < byte_codes.len() {
-            match byte_codes[self.instr_ptr] {
+            match {
+                #[cfg(feature = "instr_timing")]
+                let _t = self
+                    .instr_timings
+                    .start(smol_str::SmolStr::from("get_token"));
+
+                byte_codes[self.instr_ptr]
+            } {
                 ByteCode {
                     kind: ByteCodeKind::Write,
                     arg,
@@ -178,6 +243,11 @@ impl<IO: MachineIO> Machine<IO> {
                 } => self.loop_end_jump_if_data_not_zero(arg),
             }
         }
+
+        #[cfg(feature = "instr_timing")]
+        self.instr_timings.finalize(|s| {
+            println!("{}", s);
+        });
     }
 }
 
