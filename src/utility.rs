@@ -80,7 +80,19 @@ pub(crate) mod tracing {
 
     #[cfg(test)]
     mod test {
-        use super::InstructionTracingCollector;
+        use super::*;
+        use crate::utility::traits::is_debug;
+
+        #[test]
+        fn traits() {
+            is_debug(&InstructionTracingCollector {
+                c: std::collections::HashMap::new(),
+            });
+            is_debug(&TracingData {
+                name: smol_str::SmolStr::default(),
+                count: 0,
+            });
+        }
 
         #[test]
         fn no_data_then_collect_nothing() {
@@ -348,7 +360,26 @@ pub(crate) mod timing {
 
     #[cfg(test)]
     mod test {
-        use super::InstructionTimingCollector;
+        use super::*;
+        use crate::utility::traits::is_debug;
+
+        #[test]
+        fn traits() {
+            is_debug(&Points {
+                pt: Vec::new(),
+                pt_agg: Vec::new(),
+            });
+            is_debug(&Stat {
+                name: smol_str::SmolStr::default(),
+                mean: 0.0,
+                min: 0,
+                max: 0,
+                std_deviation: 0.0,
+            });
+            is_debug(&InstructionTimingCollector {
+                c: std::collections::HashMap::new(),
+            });
+        }
 
         #[test]
         fn start_never_called_then_only_baseline_collected() {
