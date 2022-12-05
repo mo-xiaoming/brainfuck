@@ -1,11 +1,122 @@
-#![allow(dead_code)]
-
 #[cfg(feature = "instr_tracing")]
-pub(crate) mod tracing {}
+pub(crate) mod tracing {
+    use smol_str::SmolStr;
+    use thousands::Separable;
+
+    #[derive(Debug)]
+    pub(crate) struct InstructionTracingCollector {
+        c: std::collections::HashMap<SmolStr, u128>,
+    }
+
+    #[derive(Debug)]
+    struct TracingData {
+        name: SmolStr,
+        count: u128,
+    }
+
+    impl std::fmt::Display for TracingData {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            writeln!(
+                f,
+                "{:10}: {:>15}",
+                self.name,
+                self.count.separate_with_commas()
+            )
+        }
+    }
+
+    impl InstructionTracingCollector {
+        pub(crate) fn new(codes: &[&str]) -> Self {
+            let mut c = std::collections::HashMap::with_capacity(20);
+            for &n in codes {
+                c.insert(SmolStr::from(n), 0);
+            }
+            Self { c }
+        }
+
+        pub(crate) fn add(&mut self, name: &str) {
+            let name = SmolStr::from(name);
+            if !self.c.contains_key(&name) {
+                panic!("`{}` doesn't exist when constructing this collector", name);
+            }
+            self.c.entry(name).and_modify(|e| *e += 1);
+        }
+
+        pub(crate) fn finalize_to_string(&mut self) -> String {
+            self.finalize(|vec| {
+                let mut s = String::new();
+                let mut total = 0;
+                vec.iter()
+                    .fold((&mut s, &mut total), |(acc_s, acc_total), (k, v)| {
+                        acc_s.push_str(&format!("{:10}: {:>15}\n", k, v.separate_with_commas()));
+                        *acc_total += *v;
+                        (acc_s, acc_total)
+                    });
+                s.push_str(&format!("{:-<1$}\n", "", 27));
+                s.push_str(&format!(
+                    "{:10}: {:>15}\n",
+                    "TOTAL",
+                    total.separate_with_commas()
+                ));
+                s
+            })
+        }
+
+        fn finalize<F, R>(&mut self, f: F) -> R
+        where
+            F: Fn(&[(&SmolStr, &u128)]) -> R,
+        {
+            let mut vec = self.c.iter().filter(|(_, &v)| v > 0).collect::<Vec<_>>();
+            vec.sort_by_key(|(_, &v)| std::cmp::Reverse(v));
+
+            let r = f(&vec);
+
+            // reset
+            self.c.values_mut().for_each(|v| *v = 0);
+
+            r
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::InstructionTracingCollector;
+
+        #[test]
+        fn no_data_then_collect_nothing() {
+            let mut collector = InstructionTracingCollector::new(&["a", "b"]);
+            collector.finalize(|s| {
+                assert_eq!(s.len(), 0);
+            });
+        }
+
+        #[test]
+        fn only_collect_one_then_show_one() {
+            let mut collector = InstructionTracingCollector::new(&["a", "b"]);
+            collector.add("b");
+            collector.add("b");
+            collector.finalize(|s| {
+                assert_eq!(s.len(), 1);
+                assert_eq!(s[0].0, "b");
+                assert_eq!(*s[0].1, 2);
+            });
+        }
+
+        #[test]
+        fn name_not_in_codes_should_panic() {
+            let result = std::panic::catch_unwind(|| {
+                let mut collector = InstructionTracingCollector::new(&["a", "b"]);
+                collector.add("c");
+            });
+            assert!(result.is_err());
+        }
+    }
+}
 
 #[cfg(feature = "instr_timing")]
 pub(crate) mod timing {
     use smol_str::SmolStr;
+    use thousands::Separable;
 
     /// data point for each instruction execution time
     ///
@@ -18,9 +129,8 @@ pub(crate) mod timing {
     /// # Notes
     ///
     /// For collecting the residue of the data point in `pt` when analyzing data,
-    /// `collect_pt` must be called first. Failing to do that, there'll be an
-    /// assertion failure inside `drop`
-    #[derive(Debug, Default)]
+    /// `collect_pt` must be called first
+    #[derive(Debug)]
     struct Points {
         pt: Vec<f32>,
         pt_agg: Vec<f32>,
@@ -29,17 +139,17 @@ pub(crate) mod timing {
     impl Points {
         fn new() -> Self {
             Self {
-                pt: Vec::with_capacity(5_000),
-                pt_agg: Vec::with_capacity(1_000_000),
+                pt: Vec::with_capacity(Self::threshold()),
+                pt_agg: Vec::with_capacity(5_000_000_000 / Self::threshold()),
             }
         }
         /// add a data point
         ///
         /// if `pt` threshold reaches, then data in `pt` will be collected
         /// and "moved" to `pt_agg`,
-        fn add(&mut self, u: f32) {
-            self.pt.push(u);
-            if self.pt.len() > 5_000 {
+        fn add(&mut self, u: u128) {
+            self.pt.push(u as f32);
+            if self.pt.len() > Self::threshold() {
                 self.collect_pt();
             }
         }
@@ -51,16 +161,14 @@ pub(crate) mod timing {
                 self.pt_agg.push(mean);
             }
         }
-    }
-
-    /// Checking all data in `pt` has been collected
-    impl Drop for Points {
-        fn drop(&mut self) {
-            assert!(self.pt.is_empty());
+        fn threshold() -> usize {
+            5_000
         }
     }
 
+    #[derive(Debug)]
     struct Stat {
+        name: SmolStr,
         mean: f32,
         min: u128,
         max: u128,
@@ -82,112 +190,140 @@ pub(crate) mod timing {
         pub(crate) fn new(codes: &[&str]) -> Self {
             let mut c = std::collections::HashMap::with_capacity(20);
             for &n in codes.iter().chain(std::iter::once(&Self::baseline())) {
-                c.insert(SmolStr::from(n), Points::default());
+                c.insert(SmolStr::from(n), Points::new());
             }
             Self { c }
         }
-        /// reset collector for reuse
-        fn reset(&mut self) {
-            self.c.values_mut().for_each(|v| {
-                assert!(v.pt.is_empty());
-                v.pt.clear();
-                v.pt_agg.clear();
-            });
-        }
-        // `name` is the instruction name given when `new` is called
-        pub(crate) fn start(&mut self, name: SmolStr) -> InstructionTiming {
-            assert!(self.c.contains_key(&name));
+
+        /// `name` is the instruction name given when `new` is called
+        ///
+        /// # Panics
+        ///
+        /// If the `name` does not in the `codes` during collector destruction
+        pub(crate) fn start(&mut self, name: &str) -> InstructionTiming {
+            let name = SmolStr::from(name);
+            if !self.c.contains_key(&name) {
+                panic!("`{}` doesn't exist when constructing this collector", name);
+            }
+
             InstructionTiming {
                 c: self,
                 a: std::time::Instant::now(),
                 name,
             }
         }
+
+        /// this must be called before starting collection, otherwise, data points will mix up
+        pub(crate) fn finalize_to_string(&mut self) -> String {
+            self.finalize(|v| {
+                let mut s = String::new();
+                for Stat {
+                    name,
+                    mean,
+                    min,
+                    max,
+                    std_deviation,
+                } in v.iter()
+                {
+                    let cv = std_deviation / mean;
+                    let cv_s = {
+                        let cv_s = format!("{:>6.2}", cv);
+                        if cv > 1.0 && console::Term::stdout().features().colors_supported() {
+                            console::style(cv_s).red().to_string()
+                        } else {
+                            cv_s
+                        }
+                    };
+                    s.push_str(&format!(
+                        "{:10}: mean ={:>7} std ={:>8.2} cv ={} | min ={:7}, max ={:7}\n",
+                        name,
+                        (*mean as u128).separate_with_commas(),
+                        std_deviation,
+                        cv_s,
+                        min,
+                        max
+                    ));
+                }
+                s
+            })
+        }
+
+        fn finalize<F, R>(&mut self, f: F) -> R
+        where
+            F: Fn(&[Stat]) -> R,
+        {
+            (0..5_000_000).for_each(|_| {
+                let _a = self.start(Self::baseline());
+            });
+            self.c.values_mut().for_each(Points::collect_pt);
+
+            let r = f(&self.collect());
+
+            // reset
+            self.reset();
+
+            r
+        }
+
+        /// reset collector for reuse
+        ///
+        /// # Panics
+        ///
+        /// If there are still data left
+        fn reset(&mut self) {
+            for (k, v) in self.c.iter_mut() {
+                if !v.pt.is_empty() {
+                    panic!(
+                        "{} data points of `{}` have not been collected",
+                        v.pt.len(),
+                        k
+                    );
+                }
+
+                v.pt.clear();
+                v.pt_agg.clear();
+            }
+        }
+
         const fn baseline() -> &'static str {
             "BASELINE"
         }
-        /// this must be called before calling `fmt!` to collection final analyzed data,
-        /// it clears all data points afterwards
-        pub(crate) fn finalize<F>(&mut self, f: F)
-        where
-            F: Fn(String),
-        {
-            (0..5_000_000).for_each(|_| {
-                let _a = self.start(SmolStr::from(Self::baseline()));
-            });
-            self.c.values_mut().for_each(Points::collect_pt);
-            f(self.collect());
-            self.reset();
-        }
-        fn points_to_stat(v: &[f32]) -> Option<Stat> {
-            if v.is_empty() {
+
+        fn to_stats(name: &SmolStr, points: &[f32]) -> Option<Stat> {
+            if points.is_empty() {
                 return None;
             }
 
             let (min, max) = (
-                v.iter().map(|&e| e as u128).min(),
-                v.iter().map(|&e| e as u128).max(),
+                points.iter().map(|&e| e as u128).min().unwrap(),
+                points.iter().map(|&e| e as u128).max().unwrap(),
             );
-            let mean = (!v.is_empty()).then_some(v.iter().sum::<f32>() / v.len() as f32);
-            let std_deviation = mean.map(|m| {
-                let variance = v
+            let mean = points.iter().sum::<f32>() / points.len() as f32;
+            let std_deviation = {
+                let variance = points
                     .iter()
                     .map(|e| {
-                        let diff = m - *e;
+                        let diff = mean - *e;
                         diff * diff
                     })
                     .sum::<f32>()
-                    / v.len() as f32;
+                    / points.len() as f32;
                 variance.sqrt()
-            });
+            };
             Some(Stat {
-                mean: mean.unwrap(),
-                min: min.unwrap(),
-                max: max.unwrap(),
-                std_deviation: std_deviation.unwrap(),
-            })
-        }
-        fn stat_to_string(name: &SmolStr, points: &[f32]) -> Option<String> {
-            if let Some(Stat {
+                name: name.clone(),
                 mean,
                 min,
                 max,
                 std_deviation,
-            }) = Self::points_to_stat(points)
-            {
-                let cv = std_deviation / mean;
-                let cv_s = {
-                    let cv_s = format!("{:6.2}", cv);
-                    if cv > 1.0 && console::Term::stdout().features().colors_supported() {
-                        console::style(cv_s).red().to_string()
-                    } else {
-                        cv_s
-                    }
-                };
-                Some(format!(
-                    "{:10}: mean ={:10.2} std ={:10.2} cv ={} | min ={:7}, max ={:7}\n",
-                    name, mean, std_deviation, cv_s, min, max
-                ))
-            } else {
-                None
-            }
+            })
         }
-        fn collect(&self) -> String {
+
+        fn collect(&self) -> Vec<Stat> {
             self.c
                 .iter()
-                .map(|(k, v)| Self::stat_to_string(k, &v.pt_agg))
-                .filter(Option::is_some)
-                .flatten()
+                .filter_map(|(k, v)| Self::to_stats(k, &v.pt_agg))
                 .collect()
-        }
-    }
-
-    impl Drop for InstructionTimingCollector {
-        /// to ensure all data points have been dropped incase `finalize` not gets called
-        ///
-        /// without this, assertion in `Points::drop` will fail
-        fn drop(&mut self) {
-            self.reset();
         }
     }
 
@@ -206,29 +342,55 @@ pub(crate) mod timing {
                 .c
                 .get_mut(&self.name)
                 .unwrap()
-                .add(self.a.elapsed().as_nanos() as f32);
+                .add(self.a.elapsed().as_nanos());
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::InstructionTimingCollector;
+
+        #[test]
+        fn start_never_called_then_only_baseline_collected() {
+            let mut collector = InstructionTimingCollector::new(&["a", "b"]);
+            collector.finalize(|s| {
+                assert_eq!(s.len(), 1); // BASELINE
+            });
+        }
+
+        #[test]
+        fn only_collect_one_then_show_one() {
+            let mut collector = InstructionTimingCollector::new(&["a", "b"]);
+            {
+                let _t = collector.start("b");
+            }
+            collector.finalize(|s| {
+                assert_eq!(s.len(), 2); // BASELINE and b
+                if s[0].name == "BASELINE" {
+                    assert!(s[1].name == "b");
+                } else if s[0].name == "b" {
+                    assert!(s[1].name == "BASELINE");
+                } else {
+                    panic!("{:?} doesn't have correct values", s);
+                }
+            });
+        }
+
+        #[test]
+        fn name_not_in_codes_should_panic() {
+            let result = std::panic::catch_unwind(|| {
+                let mut collector = InstructionTimingCollector::new(&["a", "b"]);
+                {
+                    let _t = collector.start("c");
+                }
+            });
+            assert!(result.is_err());
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod traits {
-    /// have everything a value type should have
-    pub(crate) fn is_small_value_struct<T>(_: &T)
-    where
-        T: Sync
-            + Send
-            + Copy
-            + Clone
-            + Default
-            + std::fmt::Debug
-            + std::hash::Hash
-            + PartialEq
-            + Eq
-            + PartialOrd
-            + Ord,
-    {
-    }
     /// have everything a value type should have, but no meaningful default
     pub(crate) fn is_small_value_struct_but_no_default<T>(_: &T)
     where
@@ -303,16 +465,6 @@ pub(crate) mod traits {
             + Ord,
     {
     }
-    pub(crate) fn is_big_but_incomparable_and_no_default<T>(_: &T)
-    where
-        T: std::fmt::Debug + Sync + Send + Clone,
-    {
-    }
-    pub(crate) fn is_big_but_incomparable<T>(_: &T)
-    where
-        T: Default + std::fmt::Debug + Sync + Send + Clone,
-    {
-    }
     pub(crate) fn is_default_debug<T>(_: &T)
     where
         T: Default + std::fmt::Debug + Sync + Send,
@@ -323,5 +475,40 @@ pub(crate) mod traits {
         T: std::fmt::Debug + Sync + Send,
     {
         format!("{:?}", v).len()
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+        struct SmallValueStructButNoDefault {}
+
+        #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+        struct BigValueStruct {}
+
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+        struct BigValueStructButNoDefault {}
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+        enum SmallValueEnum {
+            A,
+        }
+
+        #[derive(Debug, Default)]
+        struct DefaultDebugStruct {}
+
+        #[derive(Debug)]
+        struct DebugStruct {}
+
+        #[test]
+        fn test_traits() {
+            is_small_value_struct_but_no_default(&SmallValueStructButNoDefault {});
+            is_big_value_struct(&BigValueStruct {});
+            is_big_value_struct_but_no_default(&BigValueStructButNoDefault {});
+            is_small_value_enum(&SmallValueEnum::A);
+            is_default_debug(&DefaultDebugStruct {});
+            is_debug(&DebugStruct {});
+        }
     }
 }
