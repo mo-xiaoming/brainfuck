@@ -5,9 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+instr_tracing = ["dep:thousands"]
+instr_timing = ["dep:thousands"]
+
 [dependencies]
 unicode-segmentation = "1.9"
 console = "0.15"
+smol_str = "0.1"
+thousands = {version = "0.2", optional = true}
 
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }

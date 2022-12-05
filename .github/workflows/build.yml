@@ -24,7 +24,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        toolchain: [stable, beta, "stable minus 8 releases"]
+        toolchain: [stable, beta, "stable minus 5 releases"]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -42,9 +42,16 @@ jobs:
         run: cargo fmt --all -- --check 
       - name: cargo test
         run: |
-            cargo nextest run --release --all-targets --workspace
-            cargo test --release --doc --workspace
-            cargo test  --doc --workspace
+          cargo nextest run --release --all-targets --workspace
+          cargo test           --doc --workspace
+          cargo test --release --doc --workspace
+      - name: cargo test for tracing utilities
+        if: matrix.toolchain == 'stable' || matrix.toolchain == 'beta'
+        run: |
+          cargo nextest run           --features instr_timing utility::timing::
+          cargo nextest run --release --features instr_timing utility::timing::
+          cargo nextest run           --features instr_tracing utility::tracing::
+          cargo nextest run --release --features instr_tracing utility::tracing::
       - name: Generating documents
         env:
           RUSTDOCFLAGS: --cfg docsrs
@@ -55,11 +62,11 @@ jobs:
       - name: llvm-cov
         if: matrix.toolchain == 'stable'
         run: |
-            cargo llvm-cov --ignore-filename-regex='src/bin/.*\.rs' --fail-under-lines 60 --workspace
+          cargo llvm-cov --ignore-filename-regex='src/bin/.*\.rs' --fail-under-lines 80 --workspace
       - name: llvm-conv for Rust ${{ matrix.toolchain }}
         if: matrix.toolchain == 'stable'
         run: |
-            cargo llvm-cov --ignore-filename-regex='src/bin/.*\.rs' --lcov --output-path lcov.info --workspace
+          cargo llvm-cov --ignore-filename-regex='src/bin/.*\.rs' --lcov --output-path lcov.info --workspace
       - name: Upload coverage to Codecov for Rust ${{ matrix.toolchain }}
         if: matrix.toolchain == 'stable'
         uses: codecov/codecov-action@v3
