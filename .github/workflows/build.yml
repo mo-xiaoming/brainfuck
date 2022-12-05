@@ -24,7 +24,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        toolchain: [stable, beta, "stable minus 8 releases"]
+        toolchain: [stable, beta, "stable minus 5 releases"]
     steps:
       - name: Checkout
         uses: actions/checkout@v3
