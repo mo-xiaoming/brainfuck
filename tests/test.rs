@@ -28,7 +28,6 @@ struct Test {
 
 #[test]
 fn it_works() {
-    use pretty_assertions_sorted::assert_eq;
     use std::path::Path;
 
     let test_base_dir = Path::new("tests/artifacts");

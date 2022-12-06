@@ -1,4 +1,5 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
+use smol_str::SmolStr;
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -51,16 +52,16 @@ impl<'a> IntoIterator for &'a SourceFile {
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct UnicodeChar {
     idx_in_raw: usize,
-    length: usize,
+    pub(crate) uc: SmolStr,
 }
 
 pub type UnicodeChars = Vec<UnicodeChar>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct SourceFile {
-    filename: PathBuf,
-    raw_content: String,
-    content: UnicodeChars,
+    pub(crate) filename: PathBuf,
+    pub(crate) raw_content: String,
+    pub(crate) content: UnicodeChars,
 }
 
 fn make_range_for_token(
@@ -182,11 +183,11 @@ impl SourceFile {
         ]);
         while idx < self.content.len() {
             let cur_offset = self.content[idx].idx_in_raw;
-            match self.get_token(&self.content[idx]) {
+            match self.content[idx].uc.as_str() {
                 s if symbols.contains_key(s) => {
                     let arg = self.content[idx..]
                         .iter()
-                        .position(|e| self.get_token(e) != s)
+                        .position(|e| e.uc != s)
                         .unwrap_or(1);
                     byte_codes.push(make_byte_code(
                         self,
@@ -262,15 +263,11 @@ impl SourceFile {
         &self.content[instr_ptr]
     }
 
-    pub(crate) fn get_token(&self, uc: &UnicodeChar) -> &str {
-        &self.raw_content[uc.idx_in_raw..uc.idx_in_raw + uc.length]
-    }
-
     pub fn lex<S: AsRef<str>>(raw: S) -> UnicodeChars {
         UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
             .map(|(idx, uc)| UnicodeChar {
                 idx_in_raw: idx,
-                length: uc.len(),
+                uc: SmolStr::from(uc),
             })
             .collect()
     }
@@ -282,17 +279,16 @@ impl SourceFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub(crate) struct SourceFileLocation<'src_file> {
-    src_file: &'src_file SourceFile,
-    row: usize,
-    column: usize,
-    offset: usize,
+    pub(crate) src_file: &'src_file SourceFile,
+    pub(crate) row: usize,
+    pub(crate) column: usize,
+    pub(crate) offset: usize,
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::source_file::SourceFile;
-    use pretty_assertions_sorted::assert_eq;
 
     #[test]
     fn traits() {
@@ -343,7 +339,7 @@ mod test {
         assert_eq!(10, src_file.len());
         let mut s = String::with_capacity(20);
         src_file.iter().fold(&mut s, |acc, x| {
-            acc.push_str(&content[x.idx_in_raw..x.idx_in_raw + x.length]);
+            acc.push_str(x.uc.as_str());
             acc
         });
         assert_eq!(s, content);
