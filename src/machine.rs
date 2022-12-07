@@ -191,7 +191,7 @@ impl<IO: MachineIO> Machine<IO> {
                 #[cfg(feature = "instr_timing")]
                 let _t = self.instr_timing.start("get_token");
 
-                src_file.get_token(src_file.at_instr_ptr(self.instr_ptr))
+                src_file.at_instr_ptr(self.instr_ptr).uc.as_str()
             } {
                 "." => self.write(1),
                 "," => self.read(1),
@@ -227,48 +227,48 @@ impl<IO: MachineIO> Machine<IO> {
                 #[cfg(feature = "instr_timing")]
                 let _t = self.instr_timing.start("get_token");
 
-                byte_codes[self.instr_ptr]
+                &byte_codes[self.instr_ptr]
             } {
                 ByteCode {
                     kind: ByteCodeKind::Write,
                     arg,
                     ..
-                } => self.write(arg),
+                } => self.write(*arg),
                 ByteCode {
                     kind: ByteCodeKind::Read,
                     arg,
                     ..
-                } => self.read(arg),
+                } => self.read(*arg),
                 ByteCode {
                     kind: ByteCodeKind::IncPtr,
                     arg,
                     ..
-                } => self.inc_ptr(arg),
+                } => self.inc_ptr(*arg),
                 ByteCode {
                     kind: ByteCodeKind::DecPtr,
                     arg,
                     ..
-                } => self.dec_ptr(arg),
+                } => self.dec_ptr(*arg),
                 ByteCode {
                     kind: ByteCodeKind::IncData,
                     arg,
                     ..
-                } => self.inc_data(arg),
+                } => self.inc_data(*arg),
                 ByteCode {
                     kind: ByteCodeKind::DecData,
                     arg,
                     ..
-                } => self.dec_data(arg),
+                } => self.dec_data(*arg),
                 ByteCode {
                     kind: ByteCodeKind::LoopStartJumpIfDataZero,
                     arg,
                     ..
-                } => self.loop_start_jump_if_data_zero(arg),
+                } => self.loop_start_jump_if_data_zero(*arg),
                 ByteCode {
                     kind: ByteCodeKind::LoopEndJumpIfDataNotZero,
                     arg,
                     ..
-                } => self.loop_end_jump_if_data_not_zero(arg),
+                } => self.loop_end_jump_if_data_not_zero(*arg),
             }
         }
 
@@ -300,7 +300,6 @@ impl<'a> LoopCode for &'a str {
 }
 
 struct LoopCodeIter<'src_file> {
-    src_file: &'src_file SourceFile,
     it: SourceFileIter<'src_file>,
 }
 
@@ -308,7 +307,7 @@ impl<'src_file> Iterator for LoopCodeIter<'src_file> {
     type Item = &'src_file str;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.it.next().map(|uc| self.src_file.get_token(uc))
+        self.it.next().map(|uc| uc.uc.as_str())
     }
 }
 
@@ -319,7 +318,6 @@ impl<'src_file> IntoIterator for RawSourceCodes<'src_file> {
 
     fn into_iter(self) -> Self::IntoIter {
         LoopCodeIter {
-            src_file: self.src_file,
             it: self.src_file.iter(),
         }
     }

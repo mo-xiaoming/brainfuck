@@ -12,7 +12,7 @@ pub(crate) enum ByteCodeKind {
     LoopEndJumpIfDataNotZero,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct ByteCode<'src_file> {
     pub(crate) kind: ByteCodeKind,
     pub(crate) arg: usize,
@@ -21,6 +21,8 @@ pub struct ByteCode<'src_file> {
 
 #[cfg(test)]
 mod test {
+    use crate::source_file::SourceFile;
+
     use super::*;
 
     #[test]
@@ -28,5 +30,22 @@ mod test {
         use crate::utility::traits::*;
 
         is_small_value_enum(&ByteCodeKind::DecData);
+
+        let src_file = SourceFile {
+            filename: std::path::PathBuf::new(),
+            raw_content: String::new(),
+            content: vec![],
+        };
+        let src_file_loc = SourceFileLocation {
+            src_file: &src_file,
+            row: 1,
+            column: 1,
+            offset: 1,
+        };
+        is_big_value_struct_but_no_default(&ByteCode {
+            kind: ByteCodeKind::DecData,
+            arg: 1,
+            range: (src_file_loc, src_file_loc),
+        });
     }
 }

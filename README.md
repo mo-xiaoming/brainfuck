@@ -47,8 +47,23 @@ $ /usr/bin/time ./target/release/bfi tests/artifacts/mandelbrot.bf
 
 I don't know what did I do to get previous data for interpreting source file. Following are the new numbers,
 
+### New Baseline
+
 With interpreting source file directly, eval time is 133 seconds
+
+### Convert source file to byte codes
 
 With byte codes, eval time down to 29 seconds
 
+### Compress byte codes
+
 With "compressed" byte codes, eval time down to 14 seconds. "Compressed" means to transform codes like ">>>>" to "4>".
+
+### Store tokens directly instead of slicing source file
+
+Change `UnicodeChar` from storing source file index to `SmolStr`, by doing this, we don't need to do slicing each time to get tokens.
+
+- Source file evaluation time down to 78 seconds
+- Byte code evaluation time down to 10 seconds
+
+Maybe because it was a quiet day for my computer. Before this change, these two numbers were 103 (normally 133) and 12 (normally 14) seconds
