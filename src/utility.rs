@@ -507,6 +507,11 @@ pub(crate) mod traits {
     {
         format!("{:?}", v).len()
     }
+    pub(crate) fn is_display<T>(_: &T)
+    where
+        T: std::fmt::Display,
+    {
+    }
 
     #[cfg(test)]
     mod test {

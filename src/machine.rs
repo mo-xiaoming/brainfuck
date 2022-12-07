@@ -1,8 +1,6 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
 use crate::machine_io::{DefaultMachineIO, MachineIO};
-use crate::source_file::{
-    populate_byte_codes_loop_boundaries, LoopCode, SourceFile, SourceFileIter,
-};
+use crate::source_file::{populate_byte_codes_loop_boundaries, LoopCode, SourceFile};
 
 type CellDataType = u8;
 
@@ -299,8 +297,9 @@ impl<'a> LoopCode for &'a str {
     }
 }
 
+#[derive(Debug)]
 struct LoopCodeIter<'src_file> {
-    it: SourceFileIter<'src_file>,
+    it: <&'src_file SourceFile as IntoIterator>::IntoIter,
 }
 
 impl<'src_file> Iterator for LoopCodeIter<'src_file> {
