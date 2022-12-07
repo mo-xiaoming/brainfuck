@@ -18,34 +18,13 @@ impl std::fmt::Display for SourceFileError {
 }
 impl std::error::Error for SourceFileError {}
 
-#[derive(Debug)]
-pub struct SourceFileIter<'a> {
-    src_file: &'a SourceFile,
-    idx_in_src: usize,
-}
-
-impl<'a> Iterator for SourceFileIter<'a> {
-    type Item = &'a UnicodeChar;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.idx_in_src == self.src_file.len() {
-            None
-        } else {
-            self.idx_in_src += 1;
-            Some(&self.src_file.content[self.idx_in_src - 1])
-        }
-    }
-}
-
 impl<'a> IntoIterator for &'a SourceFile {
     type Item = &'a UnicodeChar;
 
-    type IntoIter = SourceFileIter<'a>;
+    type IntoIter = <&'a UnicodeChars as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        Self::IntoIter {
-            src_file: self,
-            idx_in_src: 0,
-        }
+        self.content.iter()
     }
 }
 
@@ -272,7 +251,7 @@ impl SourceFile {
             .collect()
     }
 
-    pub fn iter(&self) -> SourceFileIter<'_> {
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
         self.into_iter()
     }
 }
@@ -295,10 +274,13 @@ mod test {
         use crate::utility::traits::*;
 
         let src_file_error = SourceFileError::FileFailToRead {
-            path: PathBuf::default(),
-            reason: String::default(),
+            path: PathBuf::from("abc"),
+            reason: String::from("xyz"),
         };
         is_big_value_enum(&src_file_error);
+        is_display(&src_file_error);
+        let se = src_file_error.to_string();
+        assert!(se.contains("abc") && se.contains("xyz"));
 
         let src_file = SourceFile {
             filename: std::path::PathBuf::new(),
@@ -311,11 +293,6 @@ mod test {
         is_big_value_struct(&UnicodeChar::default());
 
         is_big_value_struct(&UnicodeChars::default());
-
-        is_debug(&SourceFileIter {
-            src_file: &src_file,
-            idx_in_src: 0,
-        });
 
         is_small_value_struct_but_no_default(&SourceFileLocation {
             src_file: &src_file,

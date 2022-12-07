@@ -67,3 +67,10 @@ Change `UnicodeChar` from storing source file index to `SmolStr`, by doing this,
 - Byte code evaluation time down to 10 seconds
 
 Maybe because it was a quiet day for my computer. Before this change, these two numbers were 103 (normally 133) and 12 (normally 14) seconds
+
+### Simplify SourceFile iterator
+
+By changing the iterator to a more direct call to `&UnicodeChars::IntoIter`,
+
+- Source file evaluation time down to 66 seconds
+- Byte code evaluation time down to 9 seconds
