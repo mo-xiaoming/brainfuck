@@ -19,9 +19,9 @@ impl std::fmt::Display for SourceFileError {
 impl std::error::Error for SourceFileError {}
 
 impl<'a> IntoIterator for &'a SourceFile {
-    type Item = &'a UnicodeChar;
+    type Item = &'a RawToken;
 
-    type IntoIter = <&'a UnicodeChars as IntoIterator>::IntoIter;
+    type IntoIter = <&'a RawTokens as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.content.iter()
@@ -29,18 +29,18 @@ impl<'a> IntoIterator for &'a SourceFile {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub struct UnicodeChar {
+pub struct RawToken {
     idx_in_raw: usize,
     pub(crate) uc: SmolStr,
 }
 
-pub type UnicodeChars = Vec<UnicodeChar>;
+pub type RawTokens = Vec<RawToken>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct SourceFile {
     pub(crate) filename: PathBuf,
     pub(crate) raw_content: String,
-    pub(crate) content: UnicodeChars,
+    pub(crate) content: RawTokens,
 }
 
 fn make_range_for_token(
@@ -92,8 +92,8 @@ where
 {
     use std::collections::HashMap;
 
-    let mut start_to_end = HashMap::<usize, usize>::new();
-    let mut end_to_start = HashMap::<usize, usize>::new();
+    let mut start_to_end = HashMap::with_capacity(1_000);
+    let mut end_to_start = HashMap::with_capacity(start_to_end.len());
 
     let mut starts = Vec::with_capacity(10);
 
@@ -238,13 +238,13 @@ impl SourceFile {
         self.content.is_empty()
     }
 
-    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &UnicodeChar {
+    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &RawToken {
         &self.content[instr_ptr]
     }
 
-    pub fn lex<S: AsRef<str>>(raw: S) -> UnicodeChars {
+    pub fn lex<S: AsRef<str>>(raw: S) -> RawTokens {
         UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
-            .map(|(idx, uc)| UnicodeChar {
+            .map(|(idx, uc)| RawToken {
                 idx_in_raw: idx,
                 uc: SmolStr::from(uc),
             })
@@ -285,14 +285,14 @@ mod test {
         let src_file = SourceFile {
             filename: std::path::PathBuf::new(),
             raw_content: String::new(),
-            content: UnicodeChars::default(),
+            content: RawTokens::default(),
         };
 
         is_big_value_struct_but_no_default(&src_file);
 
-        is_big_value_struct(&UnicodeChar::default());
+        is_big_value_struct(&RawToken::default());
 
-        is_big_value_struct(&UnicodeChars::default());
+        is_big_value_struct(&RawTokens::default());
 
         is_small_value_struct_but_no_default(&SourceFileLocation {
             src_file: &src_file,
