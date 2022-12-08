@@ -1,6 +1,7 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
 use crate::machine_io::{DefaultMachineIO, MachineIO};
-use crate::source_file::{populate_byte_codes_loop_boundaries, LoopCode, RawToken, SourceFile};
+use crate::source_file::SourceFile;
+use crate::utility::populate_loop_boundaries;
 
 type CellDataType = u8;
 
@@ -178,7 +179,7 @@ impl<IO: MachineIO> Machine<IO> {
     pub fn eval_source_file(&mut self, src_file: &SourceFile) {
         self.reset();
 
-        let (start_to_end, end_to_start) = populate_byte_codes_loop_boundaries(src_file.iter());
+        let (start_to_end, end_to_start) = populate_loop_boundaries(src_file.iter());
 
         while self.instr_ptr < src_file.len() {
             match {
@@ -280,16 +281,6 @@ impl<IO: MachineIO> Machine<IO> {
 pub fn create_default_machine() -> Machine<DefaultMachineIO> {
     let io = DefaultMachineIO::new();
     Machine::<DefaultMachineIO>::with_io(60_000, io)
-}
-
-impl<'src_file> LoopCode for &'src_file RawToken {
-    fn is_loop_start(&self) -> bool {
-        self.uc == "["
-    }
-
-    fn is_loop_end(&self) -> bool {
-        self.uc == "]"
-    }
 }
 
 #[cfg(test)]

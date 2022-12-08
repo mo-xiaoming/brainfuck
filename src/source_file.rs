@@ -1,4 +1,7 @@
-use crate::byte_code::{ByteCode, ByteCodeKind};
+use crate::{
+    byte_code::{ByteCode, ByteCodeKind},
+    utility::populate_loop_boundaries,
+};
 use smol_str::SmolStr;
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
@@ -38,9 +41,17 @@ pub type RawTokens = Vec<RawToken>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct SourceFile {
-    pub(crate) filename: PathBuf,
-    pub(crate) raw_content: String,
-    pub(crate) content: RawTokens,
+    filename: PathBuf,
+    raw_content: String,
+    content: RawTokens,
+}
+#[cfg(test)]
+pub(crate) fn make_mock_src_file() -> SourceFile {
+    SourceFile {
+        filename: std::path::PathBuf::new(),
+        raw_content: String::new(),
+        content: RawTokens::new(),
+    }
 }
 
 fn make_range_for_token(
@@ -63,52 +74,6 @@ fn make_range_for_token(
             offset: offset + 1,
         },
     )
-}
-
-pub(crate) trait LoopCode {
-    fn is_loop_start(&self) -> bool;
-    fn is_loop_end(&self) -> bool;
-}
-
-impl<'a> LoopCode for &'a ByteCode<'a> {
-    fn is_loop_start(&self) -> bool {
-        self.kind == ByteCodeKind::LoopStartJumpIfDataZero
-    }
-
-    fn is_loop_end(&self) -> bool {
-        self.kind == ByteCodeKind::LoopEndJumpIfDataNotZero
-    }
-}
-
-pub(crate) fn populate_byte_codes_loop_boundaries<I>(
-    codes: I,
-) -> (
-    std::collections::HashMap<usize, usize>,
-    std::collections::HashMap<usize, usize>,
-)
-where
-    I: Iterator,
-    <I as Iterator>::Item: LoopCode,
-{
-    use std::collections::HashMap;
-
-    let mut start_to_end = HashMap::with_capacity(1_000);
-    let mut end_to_start = HashMap::with_capacity(start_to_end.len());
-
-    let mut starts = Vec::with_capacity(10);
-
-    for (idx, code) in codes.enumerate() {
-        if code.is_loop_start() {
-            starts.push(idx);
-        } else if code.is_loop_end() {
-            let start_idx = starts.pop().unwrap();
-            let existed = start_to_end.insert(start_idx, idx);
-            assert!(existed.is_none());
-            let existed = end_to_start.insert(idx, start_idx);
-            assert!(existed.is_none());
-        }
-    }
-    (start_to_end, end_to_start)
 }
 
 impl SourceFile {
@@ -212,7 +177,7 @@ impl SourceFile {
             }
         }
 
-        let (start_to_end, end_to_start) = populate_byte_codes_loop_boundaries(byte_codes.iter());
+        let (start_to_end, end_to_start) = populate_loop_boundaries(byte_codes.iter());
         for (
             i,
             ByteCode {
@@ -258,16 +223,24 @@ impl SourceFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub(crate) struct SourceFileLocation<'src_file> {
-    pub(crate) src_file: &'src_file SourceFile,
-    pub(crate) row: usize,
-    pub(crate) column: usize,
-    pub(crate) offset: usize,
+    src_file: &'src_file SourceFile,
+    row: usize,
+    column: usize,
+    offset: usize,
+}
+#[cfg(test)]
+pub(crate) fn make_mock_src_file_loc(src_file: &SourceFile) -> SourceFileLocation {
+    SourceFileLocation {
+        src_file,
+        row: 0,
+        column: 0,
+        offset: 0,
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::source_file::SourceFile;
 
     #[test]
     fn traits() {
@@ -282,11 +255,7 @@ mod test {
         let se = src_file_error.to_string();
         assert!(se.contains("abc") && se.contains("xyz"));
 
-        let src_file = SourceFile {
-            filename: std::path::PathBuf::new(),
-            raw_content: String::new(),
-            content: RawTokens::default(),
-        };
+        let src_file = make_mock_src_file();
 
         is_big_value_struct_but_no_default(&src_file);
 
@@ -294,12 +263,7 @@ mod test {
 
         is_big_value_struct(&RawTokens::default());
 
-        is_small_value_struct_but_no_default(&SourceFileLocation {
-            src_file: &src_file,
-            row: 0,
-            column: 0,
-            offset: 0,
-        });
+        is_small_value_struct_but_no_default(&make_mock_src_file_loc(&src_file));
     }
 
     #[test]

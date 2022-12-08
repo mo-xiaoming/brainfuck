@@ -1,3 +1,64 @@
+use crate::{
+    byte_code::{ByteCode, ByteCodeKind},
+    source_file::RawToken,
+};
+
+pub(crate) trait LoopCode {
+    fn is_loop_start(&self) -> bool;
+    fn is_loop_end(&self) -> bool;
+}
+
+impl<'a> LoopCode for &'a ByteCode<'a> {
+    fn is_loop_start(&self) -> bool {
+        self.kind == ByteCodeKind::LoopStartJumpIfDataZero
+    }
+
+    fn is_loop_end(&self) -> bool {
+        self.kind == ByteCodeKind::LoopEndJumpIfDataNotZero
+    }
+}
+
+impl<'src_file> LoopCode for &'src_file RawToken {
+    fn is_loop_start(&self) -> bool {
+        self.uc == "["
+    }
+
+    fn is_loop_end(&self) -> bool {
+        self.uc == "]"
+    }
+}
+
+pub(crate) fn populate_loop_boundaries<I>(
+    codes: I,
+) -> (
+    std::collections::HashMap<usize, usize>,
+    std::collections::HashMap<usize, usize>,
+)
+where
+    I: Iterator,
+    <I as Iterator>::Item: LoopCode,
+{
+    use std::collections::HashMap;
+
+    let mut start_to_end = HashMap::with_capacity(1_000);
+    let mut end_to_start = HashMap::with_capacity(start_to_end.len());
+
+    let mut starts = Vec::with_capacity(10);
+
+    for (idx, code) in codes.enumerate() {
+        if code.is_loop_start() {
+            starts.push(idx);
+        } else if code.is_loop_end() {
+            let start_idx = starts.pop().unwrap();
+            let existed = start_to_end.insert(start_idx, idx);
+            assert!(existed.is_none());
+            let existed = end_to_start.insert(idx, start_idx);
+            assert!(existed.is_none());
+        }
+    }
+    (start_to_end, end_to_start)
+}
+
 #[cfg(feature = "instr_tracing")]
 pub(crate) mod tracing {
     use smol_str::SmolStr;
