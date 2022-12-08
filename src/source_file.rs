@@ -48,7 +48,7 @@ fn make_range_for_token(
     row: usize,
     column: usize,
     offset: usize,
-) -> (SourceFileLocation<'_>, SourceFileLocation<'_>) {
+) -> (SourceFileLocation, SourceFileLocation) {
     (
         SourceFileLocation {
             src_file,

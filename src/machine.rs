@@ -1,6 +1,6 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
 use crate::machine_io::{DefaultMachineIO, MachineIO};
-use crate::source_file::{populate_byte_codes_loop_boundaries, LoopCode, SourceFile};
+use crate::source_file::{populate_byte_codes_loop_boundaries, LoopCode, RawToken, SourceFile};
 
 type CellDataType = u8;
 
@@ -178,8 +178,7 @@ impl<IO: MachineIO> Machine<IO> {
     pub fn eval_source_file(&mut self, src_file: &SourceFile) {
         self.reset();
 
-        let (start_to_end, end_to_start) =
-            populate_byte_codes_loop_boundaries(RawSourceCodes { src_file }.into_iter());
+        let (start_to_end, end_to_start) = populate_byte_codes_loop_boundaries(src_file.iter());
 
         while self.instr_ptr < src_file.len() {
             match {
@@ -283,42 +282,13 @@ pub fn create_default_machine() -> Machine<DefaultMachineIO> {
     Machine::<DefaultMachineIO>::with_io(60_000, io)
 }
 
-struct RawSourceCodes<'src_file> {
-    src_file: &'src_file SourceFile,
-}
-
-impl<'a> LoopCode for &'a str {
+impl<'src_file> LoopCode for &'src_file RawToken {
     fn is_loop_start(&self) -> bool {
-        self == &"["
+        self.uc == "["
     }
 
     fn is_loop_end(&self) -> bool {
-        self == &"]"
-    }
-}
-
-#[derive(Debug)]
-struct LoopCodeIter<'src_file> {
-    it: <&'src_file SourceFile as IntoIterator>::IntoIter,
-}
-
-impl<'src_file> Iterator for LoopCodeIter<'src_file> {
-    type Item = &'src_file str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.it.next().map(|uc| uc.uc.as_str())
-    }
-}
-
-impl<'src_file> IntoIterator for RawSourceCodes<'src_file> {
-    type Item = &'src_file str;
-
-    type IntoIter = LoopCodeIter<'src_file>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LoopCodeIter {
-            it: self.src_file.iter(),
-        }
+        self.uc == "]"
     }
 }
 
