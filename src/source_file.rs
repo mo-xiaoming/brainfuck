@@ -177,7 +177,8 @@ impl SourceFile {
             }
         }
 
-        let (start_to_end, end_to_start) = populate_loop_boundaries(byte_codes.iter());
+        let loop_matches = populate_loop_boundaries(byte_codes.iter()).unwrap();
+
         for (
             i,
             ByteCode {
@@ -186,8 +187,8 @@ impl SourceFile {
         ) in byte_codes.iter_mut().enumerate()
         {
             match kind {
-                ByteCodeKind::LoopStartJumpIfDataZero => *arg = *start_to_end.get(&i).unwrap(),
-                ByteCodeKind::LoopEndJumpIfDataNotZero => *arg = *end_to_start.get(&i).unwrap(),
+                ByteCodeKind::LoopStartJumpIfDataZero => *arg = loop_matches.get_matching_end(i),
+                ByteCodeKind::LoopEndJumpIfDataNotZero => *arg = loop_matches.get_matching_start(i),
                 _ => (),
             }
         }

@@ -8,7 +8,7 @@ pub(crate) trait LoopCode {
     fn is_loop_end(&self) -> bool;
 }
 
-impl<'a> LoopCode for &'a ByteCode<'a> {
+impl<'src_file> LoopCode for &'src_file ByteCode<'src_file> {
     fn is_loop_start(&self) -> bool {
         self.kind == ByteCodeKind::LoopStartJumpIfDataZero
     }
@@ -28,12 +28,35 @@ impl<'src_file> LoopCode for &'src_file RawToken {
     }
 }
 
-pub(crate) fn populate_loop_boundaries<I>(
-    codes: I,
-) -> (
-    std::collections::HashMap<usize, usize>,
-    std::collections::HashMap<usize, usize>,
-)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub(crate) enum ExtraParen {
+    Left(usize),
+    Right(usize),
+}
+
+#[derive(Debug)]
+pub(crate) struct LoopMatches {
+    start_to_end: std::collections::HashMap<usize, usize>,
+    end_to_start: std::collections::HashMap<usize, usize>,
+}
+#[cfg(test)]
+fn make_mock_loop_matches() -> LoopMatches {
+    LoopMatches {
+        start_to_end: std::collections::HashMap::new(),
+        end_to_start: std::collections::HashMap::new(),
+    }
+}
+
+impl LoopMatches {
+    pub(crate) fn get_matching_start(&self, end: usize) -> usize {
+        *self.end_to_start.get(&end).unwrap()
+    }
+    pub(crate) fn get_matching_end(&self, start: usize) -> usize {
+        *self.start_to_end.get(&start).unwrap()
+    }
+}
+
+pub(crate) fn populate_loop_boundaries<I>(codes: I) -> Result<LoopMatches, ExtraParen>
 where
     I: Iterator,
     <I as Iterator>::Item: LoopCode,
@@ -49,14 +72,34 @@ where
         if code.is_loop_start() {
             starts.push(idx);
         } else if code.is_loop_end() {
-            let start_idx = starts.pop().unwrap();
+            let start_idx = starts.pop().ok_or(ExtraParen::Right(idx))?;
             let existed = start_to_end.insert(start_idx, idx);
             assert!(existed.is_none());
             let existed = end_to_start.insert(idx, start_idx);
             assert!(existed.is_none());
         }
     }
-    (start_to_end, end_to_start)
+
+    if !starts.is_empty() {
+        return Err(ExtraParen::Left(*starts.last().unwrap()));
+    }
+
+    Ok(LoopMatches {
+        start_to_end,
+        end_to_start,
+    })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::utility::traits::{is_debug, is_small_value_enum};
+
+    #[test]
+    fn traits() {
+        is_small_value_enum(&ExtraParen::Left(3));
+        is_debug(&make_mock_loop_matches());
+    }
 }
 
 #[cfg(feature = "instr_tracing")]
@@ -422,7 +465,7 @@ pub(crate) mod timing {
     #[cfg(test)]
     mod test {
         use super::*;
-        use crate::utility::traits::is_debug;
+        use crate::utility::traits::{is_debug, is_small_value_enum};
 
         #[test]
         fn traits() {
