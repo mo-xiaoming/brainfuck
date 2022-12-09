@@ -34,7 +34,7 @@ pub(crate) enum ExtraParen {
     Right(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LoopMatches {
     start_to_end: std::collections::HashMap<usize, usize>,
     end_to_start: std::collections::HashMap<usize, usize>,
@@ -93,12 +93,81 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::source_file::SourceFile;
     use crate::utility::traits::{is_debug, is_small_value_enum};
 
     #[test]
     fn traits() {
         is_small_value_enum(&ExtraParen::Left(3));
         is_debug(&make_mock_loop_matches());
+    }
+
+    #[test]
+    fn extra_left_parens() {
+        let test_data = [
+            ("[[]", 0),
+            ("+[[]", 1),
+            ("[]++[.[]", 4),
+            ("[][[]][", 6),
+            ("[][[[]][]", 2),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            assert_eq!(err, Err(ExtraParen::Left(td.1)), "src: {}", td.0);
+        }
+    }
+
+    #[test]
+    fn extra_right_parens() {
+        let test_data = [
+            ("]", 0),
+            (".[[]]]", 5),
+            (".[[]]]]", 5),
+            ("[].][][]", 3),
+            ("[][][]][]", 6),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            assert_eq!(err, Err(ExtraParen::Right(td.1)), "src: {}", td.0);
+        }
+    }
+
+    #[test]
+    fn loop_boundaries() {
+        use std::collections::HashMap;
+
+        let test_data = [
+            ("[]", HashMap::from([(0, 1)]), HashMap::from([(1, 0)])),
+            (
+                "+[[]]",
+                HashMap::from([(1, 4), (2, 3)]),
+                HashMap::from([(3, 2), (4, 1)]),
+            ),
+            (
+                "+[][]",
+                HashMap::from([(1, 2), (3, 4)]),
+                HashMap::from([(2, 1), (4, 3)]),
+            ),
+            (
+                "[[+][]-]",
+                HashMap::from([(0, 7), (1, 3), (4, 5)]),
+                HashMap::from([(3, 1), (5, 4), (7, 0)]),
+            ),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            let oracle = LoopMatches {
+                start_to_end: td.1,
+                end_to_start: td.2,
+            };
+            assert_eq!(err, Ok(oracle), "src: {}", td.0);
+        }
     }
 }
 

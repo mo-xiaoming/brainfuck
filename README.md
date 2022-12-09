@@ -75,4 +75,5 @@ By changing the iterator to a more direct call to `&UnicodeChars::IntoIter`,
 
 ### Adding unmatched parentheses detection
 
-- Source file evaluation time grows up to \$color{green}79$ seconds
+- Source file evaluation time grows up to \$color{green}80$ seconds
+- Add tests for it make the evaluation time down to \$color{gree}76$ seconds. Could be one of those machine code alignment things

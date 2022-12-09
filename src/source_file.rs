@@ -82,18 +82,15 @@ impl SourceFile {
             path: path.as_ref().to_path_buf(),
             reason: e.to_string(),
         })?;
-        Self::from_str(raw, path)
+        Ok(Self::from_str(raw, path))
     }
-    pub(crate) fn from_str<S: AsRef<str>, P: AsRef<Path>>(
-        s: S,
-        pseudo_filename: P,
-    ) -> Result<Self, SourceFileError> {
+    pub(crate) fn from_str<S: AsRef<str>, P: AsRef<Path>>(s: S, pseudo_filename: P) -> Self {
         let content = Self::lex(s.as_ref());
-        Ok(Self {
+        Self {
             filename: pseudo_filename.as_ref().to_path_buf(),
             raw_content: s.as_ref().to_owned(),
             content,
-        })
+        }
     }
 
     pub fn to_byte_codes(&self) -> Vec<ByteCode> {
@@ -292,7 +289,7 @@ mod test {
         let content = r#"[+-,comment.]
 <>"#;
 
-        let src_file = SourceFile::from_str(content, "").unwrap();
+        let src_file = SourceFile::from_str(content, "");
         let byte_code = src_file.to_byte_codes();
         assert_eq!(
             byte_code,
