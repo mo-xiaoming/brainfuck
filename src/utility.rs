@@ -56,6 +56,10 @@ impl LoopMatches {
     }
 }
 
+/// find the matching parens
+///
+/// error can only occur during `SourceFile::to_byte_codes` and `Machine::eval_src_file`,
+/// once byte codes generated, all parents are matched
 pub(crate) fn populate_loop_boundaries<I>(codes: I) -> Result<LoopMatches, ExtraParen>
 where
     I: Iterator,
@@ -123,6 +127,7 @@ mod test {
     fn extra_right_parens() {
         let test_data = [
             ("]", 0),
+            ("][", 0),
             (".[[]]]", 5),
             (".[[]]]]", 5),
             ("[].][][]", 3),

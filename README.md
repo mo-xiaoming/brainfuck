@@ -39,7 +39,7 @@ Hello World!
 
 ### Baseline
 
-End to end, doesn't do anything indirectly, encapsule no objects. Interpreting source file takes $\color{green}46$ seconds
+End to end, doesn't do anything indirectly, encapsule no objects. Interpreting source file takes $\textcolor{green}{\textsf{46}}$ seconds
 
 ```text
 $ /usr/bin/time ./target/release/bfi tests/artifacts/mandelbrot.bf
@@ -49,31 +49,31 @@ $ /usr/bin/time ./target/release/bfi tests/artifacts/mandelbrot.bf
 
 ### New Baseline
 
-With interpreting source file directly, eval time is $\color{green}133$ seconds
+With interpreting source file directly, eval time is $\textcolor{green}{\textsf{133}}$ seconds
 
 ### Convert source file to byte codes
 
-Evaluating byte codes, eval time down to $\color{yellow}29$ seconds
+Evaluating byte codes, eval time down to $\textcolor{yellow}{\textsf{29}}$ seconds
 
 ### Compress byte codes
 
-With "compressed" byte codes, byte codes eval time down to $\color{yellow}14$ seconds. "Compressed" means to transform codes like `>>>>` to somthing like `4>`.
+With "compressed" byte codes, byte codes eval time down to $\textcolor{yellow}{\textsf{14}}$ seconds. "Compressed" means to transform codes like `>>>>` to something like `4>`.
 
 ### Store tokens directly instead of slicing source file
 
 Change `UnicodeChar` from storing source file index to `SmolStr`, by doing this, we don't need to do slicing each time to get tokens.
 
-- Source file evaluation time down to $\color{green}78$ seconds
-- Byte code evaluation time down to $\color{yellow}10$ seconds
+- Source file evaluation time down to $\textcolor{green}{\textsf{78}}$ seconds
+- Byte code evaluation time down to $\textcolor{yellow}{\textsf{10}}$ seconds
 
 ### Simplify SourceFile iterator
 
 By changing the iterator to a more direct call to `&UnicodeChars::IntoIter`,
 
-- Source file evaluation time down to $\color{green}66$ seconds
-- Byte code evaluation time down to $\color{yellow}9$ seconds
+- Source file evaluation time down to $\textcolor{green}{\textsf{66}}$ seconds
+- Byte code evaluation time down to $\textcolor{yellow}{\textsf{9}}$ seconds
 
 ### Adding unmatched parentheses detection
 
-- Source file evaluation time grows up to \$color{green}80$ seconds
-- Add tests for it make the evaluation time down to \$color{gree}76$ seconds. Could be one of those machine code alignment things
+- Source file evaluation time grows up to $\textcolor{green}{\textsf{80}}$ seconds
+- Add tests for it make the evaluation time down to $\textcolor{green}{\textsf{76}}$ seconds. Could be one of those machine code alignment things
