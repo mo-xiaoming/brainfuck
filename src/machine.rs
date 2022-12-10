@@ -1,6 +1,7 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
 use crate::machine_io::{DefaultMachineIO, MachineIO};
-use crate::source_file::{populate_byte_codes_loop_boundaries, LoopCode, SourceFile};
+use crate::source_file::SourceFile;
+use crate::utility::populate_loop_boundaries;
 
 type CellDataType = u8;
 
@@ -178,8 +179,7 @@ impl<IO: MachineIO> Machine<IO> {
     pub fn eval_source_file(&mut self, src_file: &SourceFile) {
         self.reset();
 
-        let (start_to_end, end_to_start) =
-            populate_byte_codes_loop_boundaries(RawSourceCodes { src_file }.into_iter());
+        let loop_matches = populate_loop_boundaries(src_file.iter()).unwrap();
 
         while self.instr_ptr < src_file.len() {
             match {
@@ -198,11 +198,11 @@ impl<IO: MachineIO> Machine<IO> {
                 "+" => self.inc_data(1),
                 "-" => self.dec_data(1),
                 "[" => {
-                    self.loop_start_jump_if_data_zero(*start_to_end.get(&self.instr_ptr).unwrap())
+                    self.loop_start_jump_if_data_zero(loop_matches.get_matching_end(self.instr_ptr))
                 }
-                "]" => {
-                    self.loop_end_jump_if_data_not_zero(*end_to_start.get(&self.instr_ptr).unwrap())
-                }
+                "]" => self.loop_end_jump_if_data_not_zero(
+                    loop_matches.get_matching_start(self.instr_ptr),
+                ),
                 _ => self.instr_ptr += 1,
             }
         }
@@ -281,45 +281,6 @@ impl<IO: MachineIO> Machine<IO> {
 pub fn create_default_machine() -> Machine<DefaultMachineIO> {
     let io = DefaultMachineIO::new();
     Machine::<DefaultMachineIO>::with_io(60_000, io)
-}
-
-struct RawSourceCodes<'src_file> {
-    src_file: &'src_file SourceFile,
-}
-
-impl<'a> LoopCode for &'a str {
-    fn is_loop_start(&self) -> bool {
-        self == &"["
-    }
-
-    fn is_loop_end(&self) -> bool {
-        self == &"]"
-    }
-}
-
-#[derive(Debug)]
-struct LoopCodeIter<'src_file> {
-    it: <&'src_file SourceFile as IntoIterator>::IntoIter,
-}
-
-impl<'src_file> Iterator for LoopCodeIter<'src_file> {
-    type Item = &'src_file str;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.it.next().map(|uc| uc.uc.as_str())
-    }
-}
-
-impl<'src_file> IntoIterator for RawSourceCodes<'src_file> {
-    type Item = &'src_file str;
-
-    type IntoIter = LoopCodeIter<'src_file>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LoopCodeIter {
-            it: self.src_file.iter(),
-        }
-    }
 }
 
 #[cfg(test)]

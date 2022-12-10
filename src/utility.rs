@@ -1,3 +1,176 @@
+use crate::{
+    byte_code::{ByteCode, ByteCodeKind},
+    source_file::RawToken,
+};
+
+pub(crate) trait LoopCode {
+    fn is_loop_start(&self) -> bool;
+    fn is_loop_end(&self) -> bool;
+}
+
+impl<'src_file> LoopCode for &'src_file ByteCode<'src_file> {
+    fn is_loop_start(&self) -> bool {
+        self.kind == ByteCodeKind::LoopStartJumpIfDataZero
+    }
+
+    fn is_loop_end(&self) -> bool {
+        self.kind == ByteCodeKind::LoopEndJumpIfDataNotZero
+    }
+}
+
+impl<'src_file> LoopCode for &'src_file RawToken {
+    fn is_loop_start(&self) -> bool {
+        self.uc == "["
+    }
+
+    fn is_loop_end(&self) -> bool {
+        self.uc == "]"
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub(crate) enum ExtraParen {
+    Left(usize),
+    Right(usize),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LoopMatches {
+    start_to_end: std::collections::HashMap<usize, usize>,
+    end_to_start: std::collections::HashMap<usize, usize>,
+}
+#[cfg(test)]
+fn make_mock_loop_matches() -> LoopMatches {
+    LoopMatches {
+        start_to_end: std::collections::HashMap::new(),
+        end_to_start: std::collections::HashMap::new(),
+    }
+}
+
+impl LoopMatches {
+    pub(crate) fn get_matching_start(&self, end: usize) -> usize {
+        *self.end_to_start.get(&end).unwrap()
+    }
+    pub(crate) fn get_matching_end(&self, start: usize) -> usize {
+        *self.start_to_end.get(&start).unwrap()
+    }
+}
+
+pub(crate) fn populate_loop_boundaries<I>(codes: I) -> Result<LoopMatches, ExtraParen>
+where
+    I: Iterator,
+    <I as Iterator>::Item: LoopCode,
+{
+    use std::collections::HashMap;
+
+    let mut start_to_end = HashMap::with_capacity(1_000);
+    let mut end_to_start = HashMap::with_capacity(start_to_end.len());
+
+    let mut starts = Vec::with_capacity(10);
+
+    for (idx, code) in codes.enumerate() {
+        if code.is_loop_start() {
+            starts.push(idx);
+        } else if code.is_loop_end() {
+            let start_idx = starts.pop().ok_or(ExtraParen::Right(idx))?;
+            let existed = start_to_end.insert(start_idx, idx);
+            assert!(existed.is_none());
+            let existed = end_to_start.insert(idx, start_idx);
+            assert!(existed.is_none());
+        }
+    }
+
+    if !starts.is_empty() {
+        return Err(ExtraParen::Left(*starts.last().unwrap()));
+    }
+
+    Ok(LoopMatches {
+        start_to_end,
+        end_to_start,
+    })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::source_file::SourceFile;
+    use crate::utility::traits::{is_debug, is_small_value_enum};
+
+    #[test]
+    fn traits() {
+        is_small_value_enum(&ExtraParen::Left(3));
+        is_debug(&make_mock_loop_matches());
+    }
+
+    #[test]
+    fn extra_left_parens() {
+        let test_data = [
+            ("[[]", 0),
+            ("+[[]", 1),
+            ("[]++[.[]", 4),
+            ("[][[]][", 6),
+            ("[][[[]][]", 2),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            assert_eq!(err, Err(ExtraParen::Left(td.1)), "src: {}", td.0);
+        }
+    }
+
+    #[test]
+    fn extra_right_parens() {
+        let test_data = [
+            ("]", 0),
+            (".[[]]]", 5),
+            (".[[]]]]", 5),
+            ("[].][][]", 3),
+            ("[][][]][]", 6),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            assert_eq!(err, Err(ExtraParen::Right(td.1)), "src: {}", td.0);
+        }
+    }
+
+    #[test]
+    fn loop_boundaries() {
+        use std::collections::HashMap;
+
+        let test_data = [
+            ("[]", HashMap::from([(0, 1)]), HashMap::from([(1, 0)])),
+            (
+                "+[[]]",
+                HashMap::from([(1, 4), (2, 3)]),
+                HashMap::from([(3, 2), (4, 1)]),
+            ),
+            (
+                "+[][]",
+                HashMap::from([(1, 2), (3, 4)]),
+                HashMap::from([(2, 1), (4, 3)]),
+            ),
+            (
+                "[[+][]-]",
+                HashMap::from([(0, 7), (1, 3), (4, 5)]),
+                HashMap::from([(3, 1), (5, 4), (7, 0)]),
+            ),
+        ];
+
+        for td in test_data {
+            let src_file = SourceFile::from_str(td.0, "");
+            let err = populate_loop_boundaries(src_file.iter());
+            let oracle = LoopMatches {
+                start_to_end: td.1,
+                end_to_start: td.2,
+            };
+            assert_eq!(err, Ok(oracle), "src: {}", td.0);
+        }
+    }
+}
+
 #[cfg(feature = "instr_tracing")]
 pub(crate) mod tracing {
     use smol_str::SmolStr;
@@ -361,7 +534,7 @@ pub(crate) mod timing {
     #[cfg(test)]
     mod test {
         use super::*;
-        use crate::utility::traits::is_debug;
+        use crate::utility::traits::{is_debug, is_small_value_enum};
 
         #[test]
         fn traits() {

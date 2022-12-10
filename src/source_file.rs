@@ -1,4 +1,7 @@
-use crate::byte_code::{ByteCode, ByteCodeKind};
+use crate::{
+    byte_code::{ByteCode, ByteCodeKind},
+    utility::populate_loop_boundaries,
+};
 use smol_str::SmolStr;
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
@@ -19,9 +22,9 @@ impl std::fmt::Display for SourceFileError {
 impl std::error::Error for SourceFileError {}
 
 impl<'a> IntoIterator for &'a SourceFile {
-    type Item = &'a UnicodeChar;
+    type Item = &'a RawToken;
 
-    type IntoIter = <&'a UnicodeChars as IntoIterator>::IntoIter;
+    type IntoIter = <&'a RawTokens as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.content.iter()
@@ -29,18 +32,26 @@ impl<'a> IntoIterator for &'a SourceFile {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub struct UnicodeChar {
+pub struct RawToken {
     idx_in_raw: usize,
     pub(crate) uc: SmolStr,
 }
 
-pub type UnicodeChars = Vec<UnicodeChar>;
+pub type RawTokens = Vec<RawToken>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct SourceFile {
-    pub(crate) filename: PathBuf,
-    pub(crate) raw_content: String,
-    pub(crate) content: UnicodeChars,
+    filename: PathBuf,
+    raw_content: String,
+    content: RawTokens,
+}
+#[cfg(test)]
+pub(crate) fn make_mock_src_file() -> SourceFile {
+    SourceFile {
+        filename: std::path::PathBuf::new(),
+        raw_content: String::new(),
+        content: RawTokens::new(),
+    }
 }
 
 fn make_range_for_token(
@@ -48,7 +59,7 @@ fn make_range_for_token(
     row: usize,
     column: usize,
     offset: usize,
-) -> (SourceFileLocation<'_>, SourceFileLocation<'_>) {
+) -> (SourceFileLocation, SourceFileLocation) {
     (
         SourceFileLocation {
             src_file,
@@ -65,70 +76,21 @@ fn make_range_for_token(
     )
 }
 
-pub(crate) trait LoopCode {
-    fn is_loop_start(&self) -> bool;
-    fn is_loop_end(&self) -> bool;
-}
-
-impl<'a> LoopCode for &'a ByteCode<'a> {
-    fn is_loop_start(&self) -> bool {
-        self.kind == ByteCodeKind::LoopStartJumpIfDataZero
-    }
-
-    fn is_loop_end(&self) -> bool {
-        self.kind == ByteCodeKind::LoopEndJumpIfDataNotZero
-    }
-}
-
-pub(crate) fn populate_byte_codes_loop_boundaries<I>(
-    codes: I,
-) -> (
-    std::collections::HashMap<usize, usize>,
-    std::collections::HashMap<usize, usize>,
-)
-where
-    I: Iterator,
-    <I as Iterator>::Item: LoopCode,
-{
-    use std::collections::HashMap;
-
-    let mut start_to_end = HashMap::<usize, usize>::new();
-    let mut end_to_start = HashMap::<usize, usize>::new();
-
-    let mut starts = Vec::with_capacity(10);
-
-    for (idx, code) in codes.enumerate() {
-        if code.is_loop_start() {
-            starts.push(idx);
-        } else if code.is_loop_end() {
-            let start_idx = starts.pop().unwrap();
-            let existed = start_to_end.insert(start_idx, idx);
-            assert!(existed.is_none());
-            let existed = end_to_start.insert(idx, start_idx);
-            assert!(existed.is_none());
-        }
-    }
-    (start_to_end, end_to_start)
-}
-
 impl SourceFile {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, SourceFileError> {
         let raw = std::fs::read_to_string(&path).map_err(|e| SourceFileError::FileFailToRead {
             path: path.as_ref().to_path_buf(),
             reason: e.to_string(),
         })?;
-        Self::from_str(raw, path)
+        Ok(Self::from_str(raw, path))
     }
-    pub(crate) fn from_str<S: AsRef<str>, P: AsRef<Path>>(
-        s: S,
-        pseudo_filename: P,
-    ) -> Result<Self, SourceFileError> {
+    pub(crate) fn from_str<S: AsRef<str>, P: AsRef<Path>>(s: S, pseudo_filename: P) -> Self {
         let content = Self::lex(s.as_ref());
-        Ok(Self {
+        Self {
             filename: pseudo_filename.as_ref().to_path_buf(),
             raw_content: s.as_ref().to_owned(),
             content,
-        })
+        }
     }
 
     pub fn to_byte_codes(&self) -> Vec<ByteCode> {
@@ -212,7 +174,8 @@ impl SourceFile {
             }
         }
 
-        let (start_to_end, end_to_start) = populate_byte_codes_loop_boundaries(byte_codes.iter());
+        let loop_matches = populate_loop_boundaries(byte_codes.iter()).unwrap();
+
         for (
             i,
             ByteCode {
@@ -221,8 +184,8 @@ impl SourceFile {
         ) in byte_codes.iter_mut().enumerate()
         {
             match kind {
-                ByteCodeKind::LoopStartJumpIfDataZero => *arg = *start_to_end.get(&i).unwrap(),
-                ByteCodeKind::LoopEndJumpIfDataNotZero => *arg = *end_to_start.get(&i).unwrap(),
+                ByteCodeKind::LoopStartJumpIfDataZero => *arg = loop_matches.get_matching_end(i),
+                ByteCodeKind::LoopEndJumpIfDataNotZero => *arg = loop_matches.get_matching_start(i),
                 _ => (),
             }
         }
@@ -238,13 +201,13 @@ impl SourceFile {
         self.content.is_empty()
     }
 
-    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &UnicodeChar {
+    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &RawToken {
         &self.content[instr_ptr]
     }
 
-    pub fn lex<S: AsRef<str>>(raw: S) -> UnicodeChars {
+    pub fn lex<S: AsRef<str>>(raw: S) -> RawTokens {
         UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
-            .map(|(idx, uc)| UnicodeChar {
+            .map(|(idx, uc)| RawToken {
                 idx_in_raw: idx,
                 uc: SmolStr::from(uc),
             })
@@ -258,16 +221,24 @@ impl SourceFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub(crate) struct SourceFileLocation<'src_file> {
-    pub(crate) src_file: &'src_file SourceFile,
-    pub(crate) row: usize,
-    pub(crate) column: usize,
-    pub(crate) offset: usize,
+    src_file: &'src_file SourceFile,
+    row: usize,
+    column: usize,
+    offset: usize,
+}
+#[cfg(test)]
+pub(crate) fn make_mock_src_file_loc(src_file: &SourceFile) -> SourceFileLocation {
+    SourceFileLocation {
+        src_file,
+        row: 0,
+        column: 0,
+        offset: 0,
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::source_file::SourceFile;
 
     #[test]
     fn traits() {
@@ -282,24 +253,15 @@ mod test {
         let se = src_file_error.to_string();
         assert!(se.contains("abc") && se.contains("xyz"));
 
-        let src_file = SourceFile {
-            filename: std::path::PathBuf::new(),
-            raw_content: String::new(),
-            content: UnicodeChars::default(),
-        };
+        let src_file = make_mock_src_file();
 
         is_big_value_struct_but_no_default(&src_file);
 
-        is_big_value_struct(&UnicodeChar::default());
+        is_big_value_struct(&RawToken::default());
 
-        is_big_value_struct(&UnicodeChars::default());
+        is_big_value_struct(&RawTokens::default());
 
-        is_small_value_struct_but_no_default(&SourceFileLocation {
-            src_file: &src_file,
-            row: 0,
-            column: 0,
-            offset: 0,
-        });
+        is_small_value_struct_but_no_default(&make_mock_src_file_loc(&src_file));
     }
 
     #[test]
@@ -327,7 +289,7 @@ mod test {
         let content = r#"[+-,comment.]
 <>"#;
 
-        let src_file = SourceFile::from_str(content, "").unwrap();
+        let src_file = SourceFile::from_str(content, "");
         let byte_code = src_file.to_byte_codes();
         assert_eq!(
             byte_code,
