@@ -1,6 +1,6 @@
 use crate::{
     byte_code::{ByteCode, ByteCodeKind},
-    source_file::RawToken,
+    source_file::UcToken,
 };
 
 pub(crate) trait LoopCode {
@@ -8,7 +8,7 @@ pub(crate) trait LoopCode {
     fn is_loop_end(&self) -> bool;
 }
 
-impl<'src_file> LoopCode for &'src_file ByteCode<'src_file> {
+impl<'src_file> LoopCode for &'src_file ByteCode {
     fn is_loop_start(&self) -> bool {
         self.kind == ByteCodeKind::LoopStartJumpIfDataZero
     }
@@ -18,7 +18,7 @@ impl<'src_file> LoopCode for &'src_file ByteCode<'src_file> {
     }
 }
 
-impl<'src_file> LoopCode for &'src_file RawToken {
+impl<'src_file> LoopCode for &'src_file UcToken {
     fn is_loop_start(&self) -> bool {
         self.uc == "["
     }
@@ -28,10 +28,13 @@ impl<'src_file> LoopCode for &'src_file RawToken {
     }
 }
 
+/// `idx` is
+/// - `RawContentIndex` when being returned from `Machine::eval_src_file`
+/// - `UcContentIndex`  when being returned from `UcSourceFile::to_byte_codes`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub(crate) enum ExtraParen {
-    Left(usize),
-    Right(usize),
+pub enum ExtraParen {
+    Open { idx: usize },
+    Close { idx: usize },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -56,6 +59,11 @@ impl LoopMatches {
     }
 }
 
+/// find the matching parens
+///
+/// error can only occur during `UcSourceFile::to_byte_codes` and `Machine::eval_src_file`,
+/// once byte codes generated, all parens are matched, so there won't be error generated
+/// from `Machine::eval_byte_codes`
 pub(crate) fn populate_loop_boundaries<I>(codes: I) -> Result<LoopMatches, ExtraParen>
 where
     I: Iterator,
@@ -72,7 +80,7 @@ where
         if code.is_loop_start() {
             starts.push(idx);
         } else if code.is_loop_end() {
-            let start_idx = starts.pop().ok_or(ExtraParen::Right(idx))?;
+            let start_idx = starts.pop().ok_or(ExtraParen::Close { idx })?;
             let existed = start_to_end.insert(start_idx, idx);
             assert!(existed.is_none());
             let existed = end_to_start.insert(idx, start_idx);
@@ -81,7 +89,8 @@ where
     }
 
     if !starts.is_empty() {
-        return Err(ExtraParen::Left(*starts.last().unwrap()));
+        let &idx = starts.last().unwrap();
+        return Err(ExtraParen::Open { idx });
     }
 
     Ok(LoopMatches {
@@ -93,12 +102,12 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::source_file::SourceFile;
+    use crate::source_file::UcSourceFile;
     use crate::utility::traits::{is_debug, is_small_value_enum};
 
     #[test]
     fn traits() {
-        is_small_value_enum(&ExtraParen::Left(3));
+        is_small_value_enum(&ExtraParen::Open { idx: 3 });
         is_debug(&make_mock_loop_matches());
     }
 
@@ -106,6 +115,7 @@ mod test {
     fn extra_left_parens() {
         let test_data = [
             ("[[]", 0),
+            ("aa[[]", 2),
             ("+[[]", 1),
             ("[]++[.[]", 4),
             ("[][[]][", 6),
@@ -113,9 +123,9 @@ mod test {
         ];
 
         for td in test_data {
-            let src_file = SourceFile::from_str(td.0, "");
+            let src_file = UcSourceFile::from_str(td.0, "");
             let err = populate_loop_boundaries(src_file.iter());
-            assert_eq!(err, Err(ExtraParen::Left(td.1)), "src: {}", td.0);
+            assert_eq!(err, Err(ExtraParen::Open { idx: td.1 }), "src: {}", td.0);
         }
     }
 
@@ -123,6 +133,8 @@ mod test {
     fn extra_right_parens() {
         let test_data = [
             ("]", 0),
+            ("][", 0),
+            ("aa][", 2),
             (".[[]]]", 5),
             (".[[]]]]", 5),
             ("[].][][]", 3),
@@ -130,9 +142,9 @@ mod test {
         ];
 
         for td in test_data {
-            let src_file = SourceFile::from_str(td.0, "");
+            let src_file = UcSourceFile::from_str(td.0, "");
             let err = populate_loop_boundaries(src_file.iter());
-            assert_eq!(err, Err(ExtraParen::Right(td.1)), "src: {}", td.0);
+            assert_eq!(err, Err(ExtraParen::Close { idx: td.1 }), "src: {}", td.0);
         }
     }
 
@@ -160,7 +172,7 @@ mod test {
         ];
 
         for td in test_data {
-            let src_file = SourceFile::from_str(td.0, "");
+            let src_file = UcSourceFile::from_str(td.0, "");
             let err = populate_loop_boundaries(src_file.iter());
             let oracle = LoopMatches {
                 start_to_end: td.1,
@@ -534,7 +546,7 @@ pub(crate) mod timing {
     #[cfg(test)]
     mod test {
         use super::*;
-        use crate::utility::traits::{is_debug, is_small_value_enum};
+        use crate::utility::traits::is_debug;
 
         #[test]
         fn traits() {
@@ -655,8 +667,7 @@ pub(crate) mod traits {
             + Ord,
     {
     }
-    // like `is_small_value_enum`, but too big to be copied around
-    pub(crate) fn is_big_value_enum<T>(_: &T)
+    pub(crate) fn is_big_error<T>(_: &T)
     where
         T: Sync
             + Send
@@ -666,7 +677,9 @@ pub(crate) mod traits {
             + PartialEq
             + Eq
             + PartialOrd
-            + Ord,
+            + Ord
+            + std::error::Error
+            + std::fmt::Display,
     {
     }
     pub(crate) fn is_default_debug<T>(_: &T)
@@ -679,11 +692,6 @@ pub(crate) mod traits {
         T: std::fmt::Debug + Sync + Send,
     {
         format!("{:?}", v).len()
-    }
-    pub(crate) fn is_display<T>(_: &T)
-    where
-        T: std::fmt::Display,
-    {
     }
 
     #[cfg(test)]

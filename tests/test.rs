@@ -1,4 +1,4 @@
-use brainfuck::{machine::Machine, machine_io::MachineIO, source_file::SourceFile};
+use brainfuck::{machine::Machine, machine_io::MachineIO, source_file::UcSourceFile};
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -39,7 +39,7 @@ fn it_works() {
     };
     for t in &tests {
         let mut machine = Machine::with_io(30_000, io);
-        let src_file = SourceFile::new(test_base_dir.join(&t.src_file)).unwrap();
+        let src_file = UcSourceFile::new(test_base_dir.join(&t.src_file)).unwrap();
         machine.eval_source_file(&src_file);
 
         let output = std::fs::read_to_string(test_base_dir.join(&t.output)).unwrap();
@@ -50,7 +50,7 @@ fn it_works() {
             t.src_file
         );
 
-        let byte_codes = src_file.to_byte_codes();
+        let byte_codes = src_file.to_byte_codes().unwrap();
         machine.eval_byte_codes(&byte_codes);
         assert_eq!(
             output,

@@ -1,6 +1,6 @@
 use crate::byte_code::{ByteCode, ByteCodeKind};
 use crate::machine_io::{DefaultMachineIO, MachineIO};
-use crate::source_file::SourceFile;
+use crate::source_file::UcSourceFile;
 use crate::utility::populate_loop_boundaries;
 
 type CellDataType = u8;
@@ -176,7 +176,7 @@ impl<IO: MachineIO> Machine<IO> {
         }
     }
 
-    pub fn eval_source_file(&mut self, src_file: &SourceFile) {
+    pub fn eval_source_file(&mut self, src_file: &UcSourceFile) {
         self.reset();
 
         let loop_matches = populate_loop_boundaries(src_file.iter()).unwrap();
