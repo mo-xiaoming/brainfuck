@@ -1,118 +1,148 @@
 use crate::{
     byte_code::{ByteCode, ByteCodeKind},
-    utility::populate_loop_boundaries,
+    utility::{populate_loop_boundaries, ExtraParen},
 };
 use smol_str::SmolStr;
 use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub enum SourceFileError {
-    FileFailToRead { path: PathBuf, reason: String },
+pub enum UcSourceFileError<'src_file> {
+    FileFailToRead {
+        path: PathBuf,
+        reason: String,
+    },
+    UnmatchedParen {
+        src_file: &'src_file UcSourceFile,
+        details: ExtraParen,
+    },
 }
-impl std::fmt::Display for SourceFileError {
+impl<'src_file> std::fmt::Display for UcSourceFileError<'src_file> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SourceFileError::FileFailToRead { path, reason } => {
+            Self::FileFailToRead { path, reason } => {
                 write!(f, "failed to read {}, {}", path.display(), reason)
+            }
+            Self::UnmatchedParen {
+                src_file: _src_file,
+                details: _details,
+            } => {
+                write!(f, "unmatched paren")
             }
         }
     }
 }
-impl std::error::Error for SourceFileError {}
+impl<'src_file> std::error::Error for UcSourceFileError<'src_file> {}
 
-impl<'a> IntoIterator for &'a SourceFile {
-    type Item = &'a RawToken;
+impl<'a> IntoIterator for &'a UcSourceFile {
+    type Item = &'a UcToken;
 
-    type IntoIter = <&'a RawTokens as IntoIterator>::IntoIter;
+    type IntoIter = <&'a UcTokens as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.content.iter()
+        self.uc_content.iter()
     }
 }
-
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub struct RawToken {
-    idx_in_raw: usize,
-    pub(crate) uc: SmolStr,
-}
-
-pub type RawTokens = Vec<RawToken>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub struct SourceFile {
-    filename: PathBuf,
-    raw_content: String,
-    content: RawTokens,
+pub struct UcToken {
+    idx_in_raw: RawContentIndex,
+    pub(crate) uc: SmolStr,
 }
 #[cfg(test)]
-pub(crate) fn make_mock_src_file() -> SourceFile {
-    SourceFile {
-        filename: std::path::PathBuf::new(),
-        raw_content: String::new(),
-        content: RawTokens::new(),
+fn make_mock_raw_token() -> UcToken {
+    UcToken {
+        idx_in_raw: RawContentIndex::new(0),
+        uc: SmolStr::default(),
     }
 }
 
-fn make_range_for_token(
-    src_file: &SourceFile,
-    row: usize,
-    column: usize,
-    offset: usize,
-) -> (SourceFileLocation, SourceFileLocation) {
-    (
-        SourceFileLocation {
-            src_file,
-            row,
-            column,
-            offset,
-        },
-        SourceFileLocation {
-            src_file,
-            row,
-            column: column + 1,
-            offset: offset + 1,
-        },
-    )
+pub type UcTokens = Vec<UcToken>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub(crate) struct RawContentIndex(usize);
+
+impl RawContentIndex {
+    pub(crate) fn new(n: usize) -> Self {
+        Self(n)
+    }
+    pub(crate) fn inc_from(self, n: usize) -> Self {
+        Self(self.0 + n)
+    }
 }
 
-impl SourceFile {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, SourceFileError> {
-        let raw = std::fs::read_to_string(&path).map_err(|e| SourceFileError::FileFailToRead {
-            path: path.as_ref().to_path_buf(),
-            reason: e.to_string(),
-        })?;
+impl std::ops::Index<UcContentIndex> for UcSourceFile {
+    type Output = UcToken;
+
+    fn index(&self, index: UcContentIndex) -> &Self::Output {
+        &self.uc_content[index.0]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub(crate) struct UcContentIndex(usize);
+
+impl UcContentIndex {
+    pub(crate) fn new(n: usize) -> Self {
+        Self(n)
+    }
+    pub(crate) fn inc_from(self, n: usize) -> Self {
+        Self(self.0 + n)
+    }
+    pub(crate) fn get(&self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
+pub struct UcSourceFile {
+    filename: PathBuf,
+    raw_content: String,
+    uc_content: UcTokens,
+}
+#[cfg(test)]
+pub(crate) fn make_mock_src_file() -> UcSourceFile {
+    UcSourceFile {
+        filename: std::path::PathBuf::new(),
+        raw_content: String::new(),
+        uc_content: UcTokens::new(),
+    }
+}
+
+impl UcSourceFile {
+    pub fn new<'src_file, P: AsRef<Path>>(path: P) -> Result<Self, UcSourceFileError<'src_file>> {
+        let raw =
+            std::fs::read_to_string(&path).map_err(|e| UcSourceFileError::FileFailToRead {
+                path: path.as_ref().to_path_buf(),
+                reason: e.to_string(),
+            })?;
         Ok(Self::from_str(raw, path))
     }
     pub(crate) fn from_str<S: AsRef<str>, P: AsRef<Path>>(s: S, pseudo_filename: P) -> Self {
-        let content = Self::lex(s.as_ref());
         Self {
             filename: pseudo_filename.as_ref().to_path_buf(),
             raw_content: s.as_ref().to_owned(),
-            content,
+            uc_content: Self::lex(s.as_ref()),
         }
     }
 
-    pub fn to_byte_codes(&self) -> Vec<ByteCode> {
-        fn make_byte_code<'src_file, 'c>(
-            this: &'src_file SourceFile,
-            arg: usize,
-            kind: ByteCodeKind,
-            row: usize,
-            col: &'c mut usize,
-            offset: usize,
-        ) -> ByteCode<'src_file> {
-            *col += arg;
-            ByteCode {
-                kind,
-                arg,
-                range: make_range_for_token(this, row, *col - arg, offset),
-            }
-        }
+    fn lex<S: AsRef<str>>(raw: S) -> UcTokens {
+        UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
+            .map(|(idx, uc)| UcToken {
+                idx_in_raw: RawContentIndex::new(idx),
+                uc: SmolStr::from(uc),
+            })
+            .collect()
+    }
 
-        let mut row = 0;
-        let mut col = 0;
-        let mut idx = 0;
+    /*
+        fn get_diagnostics<'src_file>(&'src_file self, range: &'src_file UcSourceFileRange<'src_file>) {
+            let start_offset = range.start.offset;
+            let end_offset = range.end.offset;
+            assert_eq!(end_offset, start_offset + 1); // only one char token in bf
+        }
+    */
+    pub fn to_byte_codes(&self) -> Result<Vec<ByteCode>, UcSourceFileError> {
         let mut byte_codes = Vec::with_capacity(self.len());
         let symbols = std::collections::HashMap::from([
             ("+", ByteCodeKind::IncData),
@@ -122,117 +152,79 @@ impl SourceFile {
             (".", ByteCodeKind::Write),
             (",", ByteCodeKind::Read),
         ]);
-        while idx < self.content.len() {
-            let cur_offset = self.content[idx].idx_in_raw;
-            match self.content[idx].uc.as_str() {
+
+        let mut idx_in_ucs = UcContentIndex::new(0);
+        while idx_in_ucs != UcContentIndex::new(self.len()) {
+            let idx_in_raw = self[idx_in_ucs].idx_in_raw;
+            let idx_in_ucs_fwd = match self[idx_in_ucs].uc.as_str() {
                 s if symbols.contains_key(s) => {
-                    let arg = self.content[idx..]
+                    // TODO: not happy with exposing uc_content
+                    let arg = self.uc_content[idx_in_ucs.0..]
                         .iter()
                         .position(|e| e.uc != s)
                         .unwrap_or(1);
-                    byte_codes.push(make_byte_code(
-                        self,
-                        arg,
+                    byte_codes.push(ByteCode::make_non_jump_code(
                         *symbols.get(s).unwrap(),
-                        row,
-                        &mut col,
-                        cur_offset,
+                        idx_in_raw,
+                        arg,
                     ));
-                    idx += arg;
+                    arg
                 }
                 "[" => {
-                    byte_codes.push(make_byte_code(
-                        self,
-                        1,
+                    byte_codes.push(ByteCode::make_uninit_jump_code(
                         ByteCodeKind::LoopStartJumpIfDataZero,
-                        row,
-                        &mut col,
-                        cur_offset,
+                        idx_in_raw,
                     ));
-                    idx += 1;
+                    1
                 }
                 "]" => {
-                    byte_codes.push(make_byte_code(
-                        self,
-                        1,
+                    byte_codes.push(ByteCode::make_uninit_jump_code(
                         ByteCodeKind::LoopEndJumpIfDataNotZero,
-                        row,
-                        &mut col,
-                        cur_offset,
+                        idx_in_raw,
                     ));
-                    idx += 1;
+                    1
                 }
-                "\r\n" | "\n" => {
-                    row += 1;
-                    col = 0;
-                    idx += 1;
-                }
-                _ => {
-                    col += 1;
-                    idx += 1;
-                }
-            }
+                _ => 1,
+            };
+            idx_in_ucs = UcContentIndex::inc_from(idx_in_ucs, idx_in_ucs_fwd);
         }
 
-        let loop_matches = populate_loop_boundaries(byte_codes.iter()).unwrap();
+        let loop_matches = populate_loop_boundaries(byte_codes.iter()).map_err(|e| {
+            UcSourceFileError::UnmatchedParen {
+                src_file: self,
+                details: e,
+            }
+        })?;
 
-        for (
-            i,
-            ByteCode {
-                kind, ref mut arg, ..
-            },
-        ) in byte_codes.iter_mut().enumerate()
-        {
-            match kind {
-                ByteCodeKind::LoopStartJumpIfDataZero => *arg = loop_matches.get_matching_end(i),
-                ByteCodeKind::LoopEndJumpIfDataNotZero => *arg = loop_matches.get_matching_start(i),
+        for (idx_in_ucs, bc) in byte_codes.iter_mut().enumerate() {
+            match bc.kind {
+                ByteCodeKind::LoopStartJumpIfDataZero => bc.correct_jump(UcContentIndex::new(
+                    loop_matches.get_matching_end(idx_in_ucs),
+                )),
+                ByteCodeKind::LoopEndJumpIfDataNotZero => bc.correct_jump(UcContentIndex::new(
+                    loop_matches.get_matching_start(idx_in_ucs),
+                )),
                 _ => (),
             }
         }
 
-        byte_codes
+        Ok(byte_codes)
     }
 
     pub fn len(&self) -> usize {
-        self.content.len()
+        self.uc_content.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.content.is_empty()
+        self.uc_content.is_empty()
     }
 
-    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &RawToken {
-        &self.content[instr_ptr]
-    }
-
-    pub fn lex<S: AsRef<str>>(raw: S) -> RawTokens {
-        UnicodeSegmentation::grapheme_indices(raw.as_ref(), true)
-            .map(|(idx, uc)| RawToken {
-                idx_in_raw: idx,
-                uc: SmolStr::from(uc),
-            })
-            .collect()
+    pub(crate) fn at_instr_ptr(&self, instr_ptr: usize) -> &UcToken {
+        &self.uc_content[instr_ptr]
     }
 
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
         self.into_iter()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
-pub(crate) struct SourceFileLocation<'src_file> {
-    src_file: &'src_file SourceFile,
-    row: usize,
-    column: usize,
-    offset: usize,
-}
-#[cfg(test)]
-pub(crate) fn make_mock_src_file_loc(src_file: &SourceFile) -> SourceFileLocation {
-    SourceFileLocation {
-        src_file,
-        row: 0,
-        column: 0,
-        offset: 0,
     }
 }
 
@@ -244,12 +236,11 @@ mod test {
     fn traits() {
         use crate::utility::traits::*;
 
-        let src_file_error = SourceFileError::FileFailToRead {
+        let src_file_error = UcSourceFileError::FileFailToRead {
             path: PathBuf::from("abc"),
             reason: String::from("xyz"),
         };
-        is_big_value_enum(&src_file_error);
-        is_display(&src_file_error);
+        is_big_error(&src_file_error);
         let se = src_file_error.to_string();
         assert!(se.contains("abc") && se.contains("xyz"));
 
@@ -257,16 +248,17 @@ mod test {
 
         is_big_value_struct_but_no_default(&src_file);
 
-        is_big_value_struct(&RawToken::default());
+        is_big_value_struct_but_no_default(&make_mock_raw_token());
 
-        is_big_value_struct(&RawTokens::default());
+        is_big_value_struct_but_no_default(&make_mock_raw_token());
 
-        is_small_value_struct_but_no_default(&make_mock_src_file_loc(&src_file));
+        is_small_value_struct_but_no_default(&RawContentIndex::new(0));
+        is_small_value_struct_but_no_default(&UcContentIndex::new(0));
     }
 
     #[test]
     fn error_when_source_file_does_not_exist() {
-        assert!(SourceFile::new("I hope it doesn't exist").is_err());
+        assert!(UcSourceFile::new("I hope it doesn't exist").is_err());
     }
 
     #[test]
@@ -274,7 +266,7 @@ mod test {
         let content = r#".a̐éö̲.
 [+-]"#;
 
-        let src_file = SourceFile::lex(content);
+        let src_file = UcSourceFile::lex(content);
         assert_eq!(10, src_file.len());
         let mut s = String::with_capacity(20);
         src_file.iter().fold(&mut s, |acc, x| {
@@ -286,54 +278,39 @@ mod test {
 
     #[test]
     fn src_file_to_byte_codes() {
-        let content = r#"[+-,comment.]
-<>"#;
+        use pretty_assertions_sorted::assert_eq;
 
-        let src_file = SourceFile::from_str(content, "");
-        let byte_code = src_file.to_byte_codes();
+        let content = r#"[++-,comment.]
+<<<<>"#;
+
+        let src_file = &UcSourceFile::from_str(content, "");
+        let byte_code = src_file.to_byte_codes().unwrap();
         assert_eq!(
             byte_code,
             vec![
-                ByteCode {
-                    kind: ByteCodeKind::LoopStartJumpIfDataZero,
-                    arg: 5,
-                    range: make_range_for_token(&src_file, 0, 0, 0)
+                {
+                    let mut bc = ByteCode::make_uninit_jump_code(
+                        ByteCodeKind::LoopStartJumpIfDataZero,
+                        RawContentIndex::new(0),
+                    );
+                    bc.correct_jump(UcContentIndex::new(5));
+                    bc
                 },
-                ByteCode {
-                    kind: ByteCodeKind::IncData,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 0, 1, 1)
+                ByteCode::make_non_jump_code(ByteCodeKind::IncData, RawContentIndex::new(1), 2),
+                ByteCode::make_non_jump_code(ByteCodeKind::DecData, RawContentIndex::new(3), 1),
+                ByteCode::make_non_jump_code(ByteCodeKind::Read, RawContentIndex::new(4), 1),
+                // skip 7 bytes comment
+                ByteCode::make_non_jump_code(ByteCodeKind::Write, RawContentIndex::new(12), 1),
+                {
+                    let mut bc = ByteCode::make_uninit_jump_code(
+                        ByteCodeKind::LoopEndJumpIfDataNotZero,
+                        RawContentIndex::new(13),
+                    );
+                    bc.correct_jump(UcContentIndex::new(0));
+                    bc
                 },
-                ByteCode {
-                    kind: ByteCodeKind::DecData,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 0, 2, 2)
-                },
-                ByteCode {
-                    kind: ByteCodeKind::Read,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 0, 3, 3)
-                },
-                ByteCode {
-                    kind: ByteCodeKind::Write,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 0, 11, 11) // skip 7 bytes comment
-                },
-                ByteCode {
-                    kind: ByteCodeKind::LoopEndJumpIfDataNotZero,
-                    arg: 0,
-                    range: make_range_for_token(&src_file, 0, 12, 12)
-                },
-                ByteCode {
-                    kind: ByteCodeKind::DecPtr,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 1, 0, 14) // offset 6 is new line
-                },
-                ByteCode {
-                    kind: ByteCodeKind::IncPtr,
-                    arg: 1,
-                    range: make_range_for_token(&src_file, 1, 1, 15)
-                },
+                ByteCode::make_non_jump_code(ByteCodeKind::DecPtr, RawContentIndex::new(15), 4),
+                ByteCode::make_non_jump_code(ByteCodeKind::IncPtr, RawContentIndex::new(19), 1),
             ]
         );
     }

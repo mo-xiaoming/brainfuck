@@ -16,13 +16,13 @@
 ### As a Library
 
 ```rust
-use brainfuck::{machine::create_default_machine, source_file::SourceFile};
+use brainfuck::{machine::create_default_machine, source_file::UcSourceFile};
 
 fn main() {
     let mut machine = create_default_machine();
-    let src_file = SourceFile::new("tests/artifacts/hello_world_1.bf").unwrap();
+    let src_file = UcSourceFile::new("tests/artifacts/hello_world_1.bf").unwrap();
     machine.eval_source_file(&src_file);  // OUTPUT: Hello World!
-    let byte_codes = src_file.to_byte_codes();
+    let byte_codes = src_file.to_byte_codes().unwrap();
     machine.eval_byte_codes(&byte_codes); // OUTPUT: Hello World!
 }
 ```
@@ -76,4 +76,9 @@ By changing the iterator to a more direct call to `&UnicodeChars::IntoIter`,
 ### Adding unmatched parentheses detection
 
 - Source file evaluation time grows up to $\textcolor{green}{\textsf{80}}$ seconds
-- Add tests for it make the evaluation time down to $\textcolor{green}{\textsf{76}}$ seconds. Could be one of those machine code alignment things
+- Adding tests for it make the evaluation time down to $\textcolor{green}{\textsf{76}}$ seconds. Could be one of those machine code alignment things
+
+### Strong(er) types for column and row
+
+- This makes everything slower, source file evaluations time grows up to $\textcolor{gree}{\textsf{82}}$ seconds
+- Byte code evaluation time grows up to $\textcolor{yellow}{\textsf{10}}$ seconds, but I think it is within the margin of error
